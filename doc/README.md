@@ -1,10 +1,10 @@
 pg_qualstats
 ============
 
-pg_qualstats is a PostgreSQL extension keeping statistics about predicates found
+pg_qualstats is a PostgreSQL extension keeping statistics on predicates found
 in ```WHERE``` statements and ```JOIN``` clauses.
 
-Most of the code is a blatant rip-off from pg_stat_statements.
+Most of the code is a blatant rip-off of pg_stat_statements.
 
 The extension works by looking for known patterns in queries. Currently, this
 includes:
@@ -12,7 +12,7 @@ includes:
  - Binary OpExpr where at least one side is a column from a table. Whenever
    possible, the predicate will be swaped so that CONST OP VAR expressions are
    turned into VAR COMMUTED_OP CONST.
-   AND and OR expression members are counted as separate entries
+   AND and OR expression members are counted as separate entries.
    Ex: WHERE column1 = 2, WHERE column1 = column2, WHERE 3 = column3
 
  - ScalarArrayOpExpr where the left side is a VAR, and the right side is an
@@ -24,7 +24,7 @@ includes:
 Installation
 ------------
 
-- Need postgresql header files
+- Needs postgresql header files
 - make && sudo make install
 - Add pg_qualstats to the shared preload libraries:
 ```
@@ -47,17 +47,17 @@ The extension defines the following functions:
 
  - pg_qualstats: returns the counts for every qualifier, identified by the
    expression hash. This hash identifies each expression.
-   - *userid*: oid of the user executing the query
+   - *userid*: oid of the user who executed the query
    - *dbid*: oid of the database in which the query has been executed
    - *lrelid*, *lattnum*: oid of the relation and attribute number of the VAR on
 	 the left hand side, if any
    - *rrelid*, *rattnum*: oid of the relation and attribute number of the VAR on
 	 the right hand side, if any
    - *parenthash*: hash of the parent "AND" expression, if any. This is useful
-	 to identify predicates which are used together
-   - *nodehash*: the predicate hash. Everything (down to constants value) is
+	 for identifying predicates which are used together
+   - *nodehash*: the predicate hash. Everything (down to constants) is
 	 used to compute this hash
-   - *count*: the total number of occurence for this predicate
+   - *count*: the total number of occurences of this predicate
 
    Example:
 
@@ -83,7 +83,7 @@ The extension defines the following functions:
 In addition to that, the extension defines some views on top of the pg_qualstats
 function:
 
-  - pg_qualstats: filters calls to pg_qualstats by the current database.
+  - pg_qualstats: filters calls to pg_qualstats() by the current database.
 
   - pg_qualstats_pretty: performs the appropriate joins to display a readable
     form for every attribute from the pg_qualstats view
@@ -99,9 +99,9 @@ ro=# select * from pg_qualstats_pretty;
  public      | pgbench_branches | bid         | pg_catalog.= |              |             |              |    10
 ```
 
-  - pg_qualstats_all: sums the count for every attribute / operator pair,
+  - pg_qualstats_all: sums the counts for each attribute / operator pair,
     regardless of its position as an operand (LEFT or RIGHT), grouping together
-	attributes used in a AND clause.
+	attributes used in AND clauses.
 
     Example:
 ```
@@ -114,7 +114,7 @@ ro=# select * from pg_qualstats_all;
  74159 | {1}     |   96 |           0 |    10
 ```
 
-  - pg_qualstats_indexes: lookup those attributes for which an index doesn't
+  - pg_qualstats_indexes: looks up those attributes for which an index doesn't
     exist with the attribute in first position.
 
   Example:
@@ -134,7 +134,7 @@ Todo
 
 - TEST! TEST! TEST!
 - Add GUCs for customizing statements 
-- Add pg_qualstats_foreignkeys for advising FKs (frequently joined together
+- Add pg_qualstats_foreignkeys for suggesting FKs (frequently joined together
   columns)
 - Add integration with the query_id from pg_stat_statements.
 - Normalize queries to eliminate constants
