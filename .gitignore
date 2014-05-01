@@ -1,0 +1,3 @@
+*.o
+*.so
+pg_qualstats--*.sql

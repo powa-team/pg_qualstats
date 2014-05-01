@@ -1,0 +1,4 @@
+comment = 'An extension collecting statistics about quals'
+default_version = '0.0.1'
+module_pathname = '$libdir/pg_qualstats'
+relocatable = true
