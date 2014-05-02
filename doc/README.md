@@ -28,7 +28,7 @@ Installation
 - make && sudo make install
 - Add pg_qualstats to the shared preload libraries:
 ```
-   shared_preload_libraries = 'pg_qual_stats'
+   shared_preload_libraries = 'pg_qualstats'
 ```
 
 Usage
