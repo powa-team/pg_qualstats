@@ -40,6 +40,7 @@
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "utils/array.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/tuplestore.h"
@@ -48,6 +49,7 @@
 PG_MODULE_MAGIC;
 
 #define PGQS_COLUMNS 10
+#define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
 
 /*---- Function declarations ----*/
 
@@ -73,6 +75,7 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
 
+static int	pgqs_max;			/* max # statements to track */
 
 
 
@@ -117,6 +120,7 @@ static bool pgqs_query_tree_walker(Node *node, pgqsWalkerContext *query);
 static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *query);
 static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context);
+static void entry_dealloc(void);
 
 
 /* Global Hash */
@@ -132,6 +136,18 @@ _PG_init(void)
 	post_parse_analyze_hook = pgqs_post_parse_analyze;
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
+	DefineCustomIntVariable("pg_qualstats.max",
+			"Sets the maximum number of statements tracked by pg_qualstats.",
+							NULL,
+							&pgqs_max,
+							20000,
+							100,
+							INT_MAX,
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
 }
 
 void
@@ -153,6 +169,56 @@ pgqs_post_parse_analyze(ParseState *pstate, Query *query)
 	query_or_expression_tree_walker((Node *) query, pgqs_query_tree_walker, context, 0);
 }
 
+static int
+entry_cmp(const void *lhs, const void *rhs)
+{
+	double		l_usage = (*(pgqsEntry * const *) lhs)->count;
+	double		r_usage = (*(pgqsEntry * const *) rhs)->count;
+
+	if (l_usage < r_usage)
+		return -1;
+	else if (l_usage > r_usage)
+		return +1;
+	else
+		return 0;
+}
+
+static void
+entry_dealloc(void)
+{
+	HASH_SEQ_STATUS hash_seq;
+	pgqsEntry **entries;
+	pgqsEntry  *entry;
+	int			nvictims;
+	int			i;
+
+	/*
+	 * Sort entries by usage and deallocate USAGE_DEALLOC_PERCENT of them.
+	 * While we're scanning the table, apply the decay factor to the usage
+	 * values.
+	 */
+
+	entries = palloc(hash_get_num_entries(pgqs_hash) * sizeof(pgqsEntry *));
+
+	i = 0;
+	hash_seq_init(&hash_seq, pgqs_hash);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		entries[i++] = entry;
+	}
+
+	qsort(entries, i, sizeof(pgqsEntry *), entry_cmp);
+
+	nvictims = Max(10, i * USAGE_DEALLOC_PERCENT / 100);
+	nvictims = Min(nvictims, i);
+
+	for (i = 0; i < nvictims; i++)
+	{
+		hash_search(pgqs_hash, &entries[i]->key, HASH_REMOVE, NULL);
+	}
+
+	pfree(entries);
+}
 
 
 static bool
@@ -295,6 +361,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 			if (!found)
 			{
 				entry->count = 0;
+				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
+					entry_dealloc();
 			}
 			entry->count += 1;
 			LWLockRelease(pgqs->lock);
@@ -369,9 +437,9 @@ pgqs_shmem_startup(void)
 		pgqs->lock = LWLockAssign();
 	}
 	pgqs_hash = ShmemInitHash("pg_qualstatements_hash",
-							  100, 100,
+							  pgqs_max, pgqs_max,
 							  &info,
-							  HASH_ELEM | HASH_FUNCTION);
+							  HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
 	LWLockRelease(AddinShmemInitLock);
 }
 
@@ -431,7 +499,6 @@ pg_qualstats(PG_FUNCTION_ARGS)
 	rsinfo->setResult = tupstore;
 	rsinfo->setDesc = tupdesc;
 	hash_seq_init(&hash_seq, pgqs_hash);
-	MemoryContextSwitchTo(TopMemoryContext);
 	LWLockAcquire(pgqs->lock, LW_SHARED);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
