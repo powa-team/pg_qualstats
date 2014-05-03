@@ -239,6 +239,9 @@ pgqs_query_tree_walker(Node *node, pgqsWalkerContext *context)
 			expression_tree_walker((Node *) ((JoinExpr *) node)->larg, pgqs_query_tree_walker, context);
 			expression_tree_walker((Node *) ((JoinExpr *) node)->rarg, pgqs_query_tree_walker, context);
 			break;
+		case T_SubLink:
+			query_or_expression_tree_walker(((SubLink *) node)->subselect, pgqs_query_tree_walker, context, 0);
+			break;
 		default:
 			break;
 	}
@@ -386,7 +389,14 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 				BoolExpr * boolexpr = (BoolExpr *) node;
 				if(boolexpr->boolop == NOT_EXPR)
 				{
-					// Skip, and do not keep track of the qual
+					/* Skip, and do not keep track of the qual */
+					uint32		previous_hash = context->parenthash;
+
+					context->parenthash = 0;
+					/* Trampoline to pgqs_query_tree_walker, looking for */
+					/* subqueries */
+					expression_tree_walker(node, pgqs_query_tree_walker, context);
+					context->parenthash = previous_hash;
 					return false;
 				}
 				if(boolexpr->boolop == 	OR_EXPR)
