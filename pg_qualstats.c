@@ -98,8 +98,9 @@ typedef struct pgqsHashKey
 	Oid			opoid;			/* Operator OID */
 	Oid			rrelid;			/* relation OID or NULL if not var */
 	AttrNumber	rattnum;		/* Attribute Number or NULL if not var */
-	uint32		parenthash; 	/* Hash of the parent AND expression if any, 0 otherwise. */
-	uint32		nodehash; 		/* Hash of the node itself */
+	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
+								 * otherwise. */
+	uint32		nodehash;		/* Hash of the node itself */
 }	pgqsHashKey;
 
 
@@ -112,14 +113,14 @@ typedef struct pgqsEntry
 
 typedef struct pgqsWalkerContext
 {
-	Query	*query;
-	uint32 	parenthash;
-} pgqsWalkerContext;
+	Query	   *query;
+	uint32		parenthash;
+}	pgqsWalkerContext;
 
-static bool pgqs_query_tree_walker(Node *node, pgqsWalkerContext *query);
-static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *query);
-static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context);
-static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context);
+static bool pgqs_query_tree_walker(Node *node, pgqsWalkerContext * query);
+static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
+static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
+static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
 static void entry_dealloc(void);
 
 
@@ -162,6 +163,7 @@ static void
 pgqs_post_parse_analyze(ParseState *pstate, Query *query)
 {
 	pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
+
 	if (prev_post_parse_analyze_hook)
 		prev_post_parse_analyze_hook(pstate, query);
 	context->query = query;
@@ -222,7 +224,7 @@ entry_dealloc(void)
 
 
 static bool
-pgqs_query_tree_walker(Node *node, pgqsWalkerContext *context)
+pgqs_query_tree_walker(Node *node, pgqsWalkerContext * context)
 {
 	if (node == NULL)
 	{
@@ -250,7 +252,7 @@ pgqs_query_tree_walker(Node *node, pgqsWalkerContext *context)
 
 
 static pgqsEntry *
-pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context)
+pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context)
 {
 	OpExpr	   *op = makeNode(OpExpr);
 	int			len = 0;
@@ -293,7 +295,7 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *conte
 }
 
 static pgqsEntry *
-pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
+pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 {
 	if (list_length(expr->args) == 2)
 	{
@@ -302,7 +304,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		bool		found;
 		Oid		   *sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
-		char *noderepr = nodeToString(expr);
+		char	   *noderepr = nodeToString(expr);
 		pgqsHashKey key;
 
 		key.userid = GetUserId();
@@ -313,7 +315,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		key.rattnum = InvalidAttrNumber;
 		key.rrelid = InvalidOid;
 		key.parenthash = context->parenthash;
-		key.nodehash = hash_any((unsigned char*)noderepr, strlen(noderepr));
+		key.nodehash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 		if (IsA(var, RelabelType))
 		{
 			var = (Var *) ((RelabelType *) var)->arg;
@@ -376,7 +378,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 }
 
 static bool
-pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
+pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 {
 	if (node == NULL)
 	{
@@ -386,8 +388,9 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 	{
 		case T_BoolExpr:
 			{
-				BoolExpr * boolexpr = (BoolExpr *) node;
-				if(boolexpr->boolop == NOT_EXPR)
+				BoolExpr   *boolexpr = (BoolExpr *) node;
+
+				if (boolexpr->boolop == NOT_EXPR)
 				{
 					/* Skip, and do not keep track of the qual */
 					uint32		previous_hash = context->parenthash;
@@ -399,14 +402,15 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 					context->parenthash = previous_hash;
 					return false;
 				}
-				if(boolexpr->boolop == 	OR_EXPR)
+				if (boolexpr->boolop == OR_EXPR)
 				{
 					context->parenthash = 0;
 				}
-				if((boolexpr->boolop == AND_EXPR))
+				if ((boolexpr->boolop == AND_EXPR))
 				{
-					char *noderepr = nodeToString(node);
-					context->parenthash = hash_any((unsigned char*) noderepr, strlen(noderepr));
+					char	   *noderepr = nodeToString(node);
+
+					context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 				}
 				expression_tree_walker(node, pgqs_whereclause_tree_walker, context);
 				return false;
@@ -541,10 +545,12 @@ pg_qualstats(PG_FUNCTION_ARGS)
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}
-		if(entry->key.parenthash == 0)
+		if (entry->key.parenthash == 0)
 		{
 			nulls[i++] = true;
-		} else {
+		}
+		else
+		{
 			values[i++] = Int32GetDatum(entry->key.parenthash);
 		}
 		values[i++] = Int32GetDatum(entry->key.nodehash);
