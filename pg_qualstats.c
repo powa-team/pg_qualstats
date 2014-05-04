@@ -34,6 +34,7 @@
 #include "nodes/execnodes.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
+#include "optimizer/planner.h"
 #include "optimizer/var.h"
 #include "parser/parse_node.h"
 #include "parser/analyze.h"
@@ -65,11 +66,11 @@ PG_FUNCTION_INFO_V1(pg_qualstats);
 
 
 
-static void pgqs_post_parse_analyze(ParseState *pstate, Query *query);
+static PlannedStmt *pgqs_planner(Query *query, int cursorOptions, ParamListInfo boundParams);
 static void pgqs_shmem_startup(void);
 
 
-static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
+static planner_hook_type prev_planner_hook = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
@@ -133,8 +134,8 @@ static pgqsSharedState *pgqs = NULL;
 void
 _PG_init(void)
 {
-	prev_post_parse_analyze_hook = post_parse_analyze_hook;
-	post_parse_analyze_hook = pgqs_post_parse_analyze;
+	prev_planner_hook = planner_hook;
+	planner_hook = pgqs_planner;
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
 	DefineCustomIntVariable("pg_qualstats.max",
@@ -156,19 +157,25 @@ _PG_fini(void)
 {
 	/* Uninstall hooks. */
 	shmem_startup_hook = prev_shmem_startup_hook;
-	post_parse_analyze_hook = prev_post_parse_analyze_hook;
+	planner_hook = prev_planner_hook;
 }
 
-static void
-pgqs_post_parse_analyze(ParseState *pstate, Query *query)
+static PlannedStmt *
+pgqs_planner(Query *parse,
+			 int cursorOptions,
+			 ParamListInfo boundParams)
 {
+	PlannedStmt *plannedstmt = NULL;
 	pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
-	if (prev_post_parse_analyze_hook)
-		prev_post_parse_analyze_hook(pstate, query);
-	context->query = query;
+	if (prev_planner_hook)
+		plannedstmt = prev_planner_hook(parse, cursorOptions, boundParams);
+	else
+		plannedstmt = standard_planner(parse, cursorOptions, boundParams);
+	context->query = parse;
 	context->parenthash = 0;
-	query_or_expression_tree_walker((Node *) query, pgqs_query_tree_walker, context, 0);
+	query_or_expression_tree_walker((Node *) parse, pgqs_query_tree_walker, context, 0);
+	return plannedstmt;
 }
 
 static int
@@ -325,9 +332,12 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			/* Register it */
 			RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
 
-			key.lrelid = rte->relid;
-			key.lattnum = var->varattno;
-			keep = true;
+			if (rte->rtekind == RTE_RELATION)
+			{
+				key.lrelid = rte->relid;
+				key.lattnum = var->varattno;
+				keep = true;
+			}
 		}
 		/* If the operator can be commuted, look at it */
 		if (!keep)
