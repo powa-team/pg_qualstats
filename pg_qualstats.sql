@@ -94,4 +94,38 @@ FROM (
 			i.indisunique)) 
   )
   GROUP BY qs.relid, nodehash
-) t GROUP BY relid, attnames, possible_types
+) t GROUP BY relid, attnames, possible_types;
+
+CREATE OR REPLACE VIEW pg_qualstats_indexes_ddl AS
+ SELECT q.nspname,
+    q.relid,
+    q.attnames,
+    q.idxtype,
+    q.count,
+    'CREATE INDEX idx_' || relid || '_' || array_to_string(attnames, '_') || ' ON ' || nspname || '.' || relid || '(' || array_to_string(attnames, ', ') || ') USING ' || idxtype AS ddl
+ FROM (SELECT t.nspname,
+    t.relid,
+    t.attnames,
+    unnest(t.possible_types) AS idxtype,
+    sum(t.count) AS count
+
+   FROM ( SELECT nl.nspname AS nspname,
+            qs.relid::regclass AS relid,
+            array_agg(DISTINCT attnames.attnames) AS attnames,
+            array_agg(DISTINCT pg_am.amname) AS possible_types,
+            max(qs.count) AS count,
+            array_agg(DISTINCT attnum.attnum) AS attnums
+           FROM pg_qualstats_all qs
+           LEFT JOIN (pg_class cl JOIN pg_namespace nl ON nl.oid = cl.relnamespace) ON cl.oid = qs.relid
+           JOIN pg_amop amop ON amop.amopopr = qs.opno
+           JOIN pg_am ON amop.amopmethod = pg_am.oid,
+           LATERAL ( SELECT pg_attribute.attname AS attnames
+                       FROM pg_attribute
+                       JOIN unnest(qs.attnums) a(a) ON a.a = pg_attribute.attnum AND pg_attribute.attrelid = qs.relid
+                      ORDER BY pg_attribute.attnum) attnames,
+           LATERAL unnest(qs.attnums) attnum(attnum)
+          WHERE NOT (EXISTS ( SELECT 1
+                               FROM pg_index i
+                              WHERE i.indrelid = qs.relid AND ((i.indkey::smallint[])[0:array_length(qs.attnums, 1) - 1] @> qs.attnums OR qs.attnums @> (i.indkey::smallint[])[0:array_length(i.indkey, 1) + 1] AND i.indisunique)))
+          GROUP BY nl.nspname, qs.relid, qs.nodehash) t
+  GROUP BY t.nspname, t.relid, t.attnames, t.possible_types) q;
