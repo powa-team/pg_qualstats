@@ -31,6 +31,13 @@ Installation
    shared_preload_libraries = 'pg_qualstats'
 ```
 
+Configuration
+-------------
+
+The following GUCs can be configured, in postgresql.conf:
+
+- pg_qualstats.max: the maximum number of statements tracked (defaults to 20000)
+
 Usage
 -----
 
@@ -58,6 +65,8 @@ The extension defines the following functions:
    - *nodehash*: the predicate hash. Everything (down to constants) is
 	 used to compute this hash
    - *count*: the total number of occurences of this predicate
+   - *queryid*: if pg_stats_statements is installed, the queryid identifying
+     this query
 
    Example:
 
@@ -133,8 +142,8 @@ Todo
 ----
 
 - TEST! TEST! TEST!
-- Add GUCs for customizing statements 
 - Add pg_qualstats_foreignkeys for suggesting FKs (frequently joined together
   columns)
-- Add integration with the query_id from pg_stat_statements.
 - Normalize queries to eliminate constants
+- Function or example in docs on how to use pg_qualstats with
+  pg_stats_statements.
