@@ -3,25 +3,14 @@
  * pg_qualstats.c
  *		Track frequently used quals.
  *
- * This extension works by installing a hook, pgqs_post_parse_analyze.
+ * This extension works by installing a planner hook, pgqs_planner.
  * This hook looks for every qual in the query, and stores the qual of the form:
  *		- EXPR OPERATOR CONSTANT
  *		- EXPR OPERATOR EXPR
  *
- * This hash table is queriable with the pg_qualstats function, which returns
- * tuples of the following form:
- *
- * - qual: string representation of the qual
- * - count: number of times this qual has been executed
- * - queryid: this field is set to the query_id added by pg_stat_statements if
- *	 it is installed, NULL otherwise.
- *
  * The implementation is heavily inspired by pg_stat_statements
  *
  * Copyright (c) 2014, Ronan Dunklau
- *
- * IDENTIFICATION
- *	  contrib/pg_stat_statements/pg_stat_statements.c
  *
  *-------------------------------------------------------------------------
  */
