@@ -102,7 +102,7 @@ CREATE OR REPLACE VIEW pg_qualstats_indexes_ddl AS
     q.attnames,
     q.idxtype,
     q.count,
-    'CREATE INDEX idx_' || relid || '_' || array_to_string(attnames, '_') || ' ON ' || nspname || '.' || relid || '(' || array_to_string(attnames, ', ') || ') USING ' || idxtype AS ddl
+    'CREATE INDEX idx_' || relid || '_' || array_to_string(attnames, '_') || ' ON ' || nspname || '.' || relid ||  ' USING ' || idxtype || ' (' || array_to_string(attnames, ', ') || ')'  AS ddl
  FROM (SELECT t.nspname,
     t.relid,
     t.attnames,
