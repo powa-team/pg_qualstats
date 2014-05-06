@@ -13,7 +13,8 @@ CREATE FUNCTION pg_qualstats(
   OUT rattnum smallint,
   OUT parenthash  int,
   OUT nodehash 	  int,
-  OUT count bigint
+  OUT count bigint,
+  OUT queryid	 int
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'

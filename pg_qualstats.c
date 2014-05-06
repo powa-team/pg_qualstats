@@ -49,7 +49,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 10
+#define PGQS_COLUMNS 11
 #define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
 
 /*---- Function declarations ----*/
@@ -102,6 +102,7 @@ typedef struct pgqsHashKey
 	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
 								 * otherwise. */
 	uint32		nodehash;		/* Hash of the node itself */
+	uint32		queryid;		/* query identifier (if set by another plugin */
 }	pgqsHashKey;
 
 
@@ -323,6 +324,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.rrelid = InvalidOid;
 		key.parenthash = context->parenthash;
 		key.nodehash = hash_any((unsigned char *) noderepr, strlen(noderepr));
+		key.queryid = context->query->queryId;
 		if (IsA(var, RelabelType))
 		{
 			var = (Var *) ((RelabelType *) var)->arg;
@@ -561,10 +563,18 @@ pg_qualstats(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			values[i++] = Int32GetDatum(entry->key.parenthash);
+			values[i++] = UInt32GetDatum(entry->key.parenthash);
 		}
-		values[i++] = Int32GetDatum(entry->key.nodehash);
+		values[i++] = UInt32GetDatum(entry->key.nodehash);
 		values[i++] = Int64GetDatumFast(entry->count);
+		if (entry->key.queryid == 0)
+		{
+			nulls[i++] = true;
+		}
+		else
+		{
+			values[i++] = UInt32GetDatum(entry->key.queryid);
+		}
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 	LWLockRelease(pgqs->lock);
