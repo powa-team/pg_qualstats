@@ -228,6 +228,8 @@ entry_dealloc(void)
 static bool
 pgqs_query_tree_walker(Node *node, pgqsWalkerContext * context)
 {
+	char	   *noderepr;
+
 	if (node == NULL)
 	{
 		return false;
@@ -235,11 +237,17 @@ pgqs_query_tree_walker(Node *node, pgqsWalkerContext * context)
 	switch (node->type)
 	{
 		case T_FromExpr:
+			noderepr = nodeToString(((FromExpr *) node)->quals);
+			context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 			pgqs_whereclause_tree_walker(((FromExpr *) node)->quals, context);
+			context->parenthash = 0;
 			expression_tree_walker((Node *) ((FromExpr *) node)->fromlist, pgqs_query_tree_walker, context);
 			break;
 		case T_JoinExpr:
+			noderepr = nodeToString(((JoinExpr *) node)->quals);
+			context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 			pgqs_whereclause_tree_walker(((JoinExpr *) node)->quals, context);
+			context->parenthash = 0;
 			expression_tree_walker((Node *) ((JoinExpr *) node)->larg, pgqs_query_tree_walker, context);
 			expression_tree_walker((Node *) ((JoinExpr *) node)->rarg, pgqs_query_tree_walker, context);
 			break;

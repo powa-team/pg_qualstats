@@ -43,7 +43,6 @@ CREATE VIEW pg_qualstats_pretty AS
 		nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
-        constvalue as constvalue,
 		sum(count) as count
   from pg_qualstats qs
   left join (pg_class cl inner join pg_namespace nl on nl.oid = cl.relnamespace) on cl.oid = qs.lrelid
