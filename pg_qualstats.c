@@ -30,6 +30,7 @@
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "utils/array.h"
+#include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -38,8 +39,9 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 11
-#define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
+#define PGQS_COLUMNS 12
+#define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
+#define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
 /*---- Function declarations ----*/
 
@@ -98,6 +100,9 @@ typedef struct pgqsHashKey
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
+	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
+												 * the right hand constant, if
+												 * any */
 	int64		count;
 }	pgqsEntry;
 
@@ -132,7 +137,7 @@ _PG_init(void)
 			"Sets the maximum number of statements tracked by pg_qualstats.",
 							NULL,
 							&pgqs_max,
-							20000,
+							10000,
 							100,
 							INT_MAX,
 							PGC_POSTMASTER,
@@ -192,9 +197,9 @@ entry_dealloc(void)
 	int			i;
 
 	/*
-	 * Sort entries by usage and deallocate USAGE_DEALLOC_PERCENT of them.
-	 * While we're scanning the table, apply the decay factor to the usage
-	 * values.
+	 * Sort entries by usage and deallocate PGQS_USAGE_DEALLOC_PERCENT of
+	 * them. While we're scanning the table, apply the decay factor to the
+	 * usage values.
 	 */
 
 	entries = palloc(hash_get_num_entries(pgqs_hash) * sizeof(pgqsEntry *));
@@ -208,7 +213,7 @@ entry_dealloc(void)
 
 	qsort(entries, i, sizeof(pgqsEntry *), entry_cmp);
 
-	nvictims = Max(10, i * USAGE_DEALLOC_PERCENT / 100);
+	nvictims = Max(10, i * PGQS_USAGE_DEALLOC_PERCENT / 100);
 	nvictims = Min(nvictims, i);
 
 	for (i = 0; i < nvictims; i++)
@@ -291,13 +296,106 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 	return entry;
 }
 
+static void
+get_const_expr(Const *constval, StringInfo buf)
+{
+	Oid			typoutput;
+	bool		typIsVarlena;
+	char	   *extval;
+
+	if (constval->constisnull)
+	{
+		/*
+		 * Always label the type of a NULL constant to prevent misdecisions
+		 * about type when reparsing.
+		 */
+		appendStringInfoString(buf, "NULL");
+		appendStringInfo(buf, "::%s",
+						 format_type_with_typemod(constval->consttype,
+												  constval->consttypmod));
+		return;
+	}
+
+	getTypeOutputInfo(constval->consttype,
+					  &typoutput, &typIsVarlena);
+
+	extval = OidOutputFunctionCall(typoutput, constval->constvalue);
+
+	switch (constval->consttype)
+	{
+		case INT2OID:
+		case INT4OID:
+		case INT8OID:
+		case OIDOID:
+		case FLOAT4OID:
+		case FLOAT8OID:
+		case NUMERICOID:
+			{
+				/*
+				 * These types are printed without quotes unless they contain
+				 * values that aren't accepted by the scanner unquoted (e.g.,
+				 * 'NaN').	Note that strtod() and friends might accept NaN,
+				 * so we can't use that to test.
+				 *
+				 * In reality we only need to defend against infinity and NaN,
+				 * so we need not get too crazy about pattern matching here.
+				 *
+				 * There is a special-case gotcha: if the constant is signed,
+				 * we need to parenthesize it, else the parser might see a
+				 * leading plus/minus as binding less tightly than adjacent
+				 * operators --- particularly, the cast that we might attach
+				 * below.
+				 */
+				if (strspn(extval, "0123456789+-eE.") == strlen(extval))
+				{
+					if (extval[0] == '+' || extval[0] == '-')
+						appendStringInfo(buf, "(%s)", extval);
+					else
+						appendStringInfoString(buf, extval);
+				}
+				else
+					appendStringInfo(buf, "'%s'", extval);
+			}
+			break;
+
+		case BITOID:
+		case VARBITOID:
+			appendStringInfo(buf, "B'%s'", extval);
+			break;
+
+		case BOOLOID:
+			if (strcmp(extval, "t") == 0)
+				appendStringInfoString(buf, "true");
+			else
+				appendStringInfoString(buf, "false");
+			break;
+
+		default:
+			appendStringInfoString(buf, quote_literal_cstr(extval));
+			break;
+	}
+
+	pfree(extval);
+
+	/*
+	 * For showtype == 0, append ::typename unless the constant will be
+	 * implicitly typed as the right type when it is read in.
+	 */
+	appendStringInfo(buf, "::%s",
+					 format_type_with_typemod(constval->consttype,
+											  constval->consttypmod));
+
+}
+
+
 static pgqsEntry *
 pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 {
 	if (list_length(expr->args) == 2)
 	{
-		Var		   *var = linitial(expr->args);
-		bool		keep = false;
+		Node	   *node = linitial(expr->args);
+		Var		   *var = NULL;
+		Const	   *constant = NULL;
 		bool		found;
 		Oid		   *sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
@@ -314,51 +412,70 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.parenthash = context->parenthash;
 		key.nodehash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 		key.queryid = context->query->queryId;
-		if (IsA(var, RelabelType))
+		if (IsA(node, RelabelType))
 		{
-			var = (Var *) ((RelabelType *) var)->arg;
+			node = (Node *) ((RelabelType *) node)->arg;
 		}
-		if (IsA(var, Var))
+		switch (node->type)
 		{
-			/* Register it */
-			RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
+			case T_Var:
+				var = (Var *) node;
+				{
+					/* Register it */
+					RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
 
-			if (rte->rtekind == RTE_RELATION)
-			{
-				key.lrelid = rte->relid;
-				key.lattnum = var->varattno;
-				keep = true;
-			}
+					if (rte->rtekind == RTE_RELATION)
+					{
+						key.lrelid = rte->relid;
+						key.lattnum = var->varattno;
+					}
+				}
+				break;
+			case T_Const:
+				constant = (Const *) node;
+				break;
+			default:
+				break;
 		}
 		/* If the operator can be commuted, look at it */
-		if (!keep)
+		if (var == NULL)
 		{
 			if (OidIsValid(get_commutator(expr->opno)))
 			{
 				OpExpr	   *temp = copyObject(expr);
 
 				CommuteOpExpr(temp);
-				var = linitial(temp->args);
+				node = linitial(temp->args);
 				sreliddest = &(key.lrelid);
 				sattnumdest = &(key.lattnum);
 			}
 		}
 		else
 		{
-			var = lsecond(expr->args);
+
+			node = lsecond(expr->args);
 			sreliddest = &(key.rrelid);
 			sattnumdest = &(key.rattnum);
 
 		}
-		if (IsA(var, Var))
+		switch (node->type)
 		{
-			RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
+			case T_Var:
+				var = (Var *) node;
+				{
+					RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
 
-			keep = true;
-			*sreliddest = rte->relid;
-			*sattnumdest = var->varattno;
+					*sreliddest = rte->relid;
+					*sattnumdest = var->varattno;
+				}
+				break;
+			case T_Const:
+				constant = (Const *) node;
+				break;
+			default:
+				break;
 		}
-		if (keep)
+		if (var != NULL)
 		{
 			pgqsEntry  *entry;
 
@@ -367,6 +484,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			if (!found)
 			{
 				entry->count = 0;
+				if (constant != NULL)
+				{
+					StringInfo	buf = makeStringInfo();
+
+					get_const_expr(constant, buf);
+					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
+				}
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 					entry_dealloc();
 			}
@@ -563,6 +687,15 @@ pg_qualstats(PG_FUNCTION_ARGS)
 		else
 		{
 			values[i++] = UInt32GetDatum(entry->key.queryid);
+		}
+		if (entry->constvalue)
+		{
+
+			values[i++] = CStringGetTextDatum(strdup(entry->constvalue));
+		}
+		else
+		{
+			nulls[i++] = true;
 		}
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
