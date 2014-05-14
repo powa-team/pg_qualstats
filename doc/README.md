@@ -20,6 +20,8 @@ includes:
    Ex: WHERE column1 IN (2, 3) will be counted as 2 occurences for the (column1,
    '=') operator pair
 
+This project is sponsored by [Dalibo](http://dalibo.com)
+
 
 Installation
 ------------
