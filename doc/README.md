@@ -42,7 +42,7 @@ Configuration
 
 The following GUCs can be configured, in postgresql.conf:
 
-- pg_qualstats.max: the maximum number of statements tracked (defaults to 20000)
+- pg_qualstats.max: the maximum number of statements tracked (defaults to 1000)
 
 Usage
 -----
