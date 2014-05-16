@@ -29,8 +29,9 @@ This project is sponsored by [Dalibo](http://dalibo.com)
 Installation
 ------------
 
+- Compatible with PostgreSQL 9.3 and 9.4
 - Needs postgresql header files
-- make && sudo make install
+- sudo make install
 - Add pg_qualstats to the shared preload libraries:
 ```
    shared_preload_libraries = 'pg_qualstats'
