@@ -1,10 +1,18 @@
 {
    "name": "pg_qualstats",
-   "abstract": "An extension collecting statistics about quals",
+   "abstract": "An extension collecting statistics about predicates",
    "version": "__VERSION__",
    "maintainer": "Ronan Dunklau <ronan.dunklau@dalibo.com>",
    "license": "postgresql",
    "release_status": "testing",
+   "provides": {
+        "pg_qualstats": {
+            "abstract": "An extension collecting statistics about predicates",
+            "file": "pg_qualstats.sql",
+            "docfile": "doc/README.md",
+            "version": "__VERSION__"
+        }
+    },
    "meta-spec": {
       "version": "1.0.0",
       "url": "http://pgxn.org/meta/spec.txt"
