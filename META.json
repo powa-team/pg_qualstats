@@ -4,6 +4,7 @@
    "version": "__VERSION__",
    "maintainer": "Ronan Dunklau <ronan.dunklau@dalibo.com>",
    "license": "postgresql",
+   "release_status": "testing",
    "meta-spec": {
       "version": "1.0.0",
       "url": "http://pgxn.org/meta/spec.txt"
