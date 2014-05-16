@@ -12,6 +12,14 @@ all: $(EXTENSION)--$(EXTVERSION).sql
 $(EXTENSION)--$(EXTVERSION).sql: $(EXTENSION).sql
 	cp $< $@
 
+release-zip: all
+	git archive --format zip --prefix=pg_qualstats-$(EXTVERSION)/ --output ./pg_qualstats-$(EXTVERSION).zip HEAD
+	unzip ./pg_qualstats-$(EXTVERSION).zip
+	rm ./pg_qualstats-$(EXTVERSION).zip
+	sed -i -e "s/__VERSION__/$(EXTVERSION)/g"  ./pg_qualstats-$(EXTVERSION)/META.json
+	zip -r ./pg_qualstats-$(EXTVERSION).zip ./pg_qualstats-$(EXTVERSION)/
+	rm ./pg_qualstats-$(EXTVERSION) -rf
+
 
 DATA = $(wildcard *--*.sql) $(EXTENSION)--$(EXTVERSION).sql
 EXTRA_CLEAN = $(EXTENSION)--$(EXTVERSION).sql
