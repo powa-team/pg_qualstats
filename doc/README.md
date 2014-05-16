@@ -1,6 +1,9 @@
 pg_qualstats
 ============
 
+This software is EXPERIMENTAL and therefore NOT production ready. Use at your
+own risk.
+
 pg_qualstats is a PostgreSQL extension keeping statistics on predicates found
 in ```WHERE``` statements and ```JOIN``` clauses.
 
@@ -69,19 +72,17 @@ The extension defines the following functions:
    - *count*: the total number of occurences of this predicate
    - *queryid*: if pg_stats_statements is installed, the queryid identifying
      this query
+   - *constvalue*: a string representation of the right-hand side constant, if
+     any, truncated to 80 bytes.
 
    Example:
 
 ```
- userid | dbid  | lrelid | lattnum | opno | rrelid | rattnum | parenthash |  nodehash   | count 
---------+-------+--------+---------+------+--------+---------+------------+-------------+-------
-     10 | 16384 |  74159 |       1 |   96 |        |         |          0 |  2122697166 |     5
-     10 | 16384 |  74159 |       1 |   96 |        |         |          0 |   484467142 |     2
-     10 | 16384 |  74159 |       1 |   96 |        |         |          0 |  1590474470 |     3
-     10 | 16384 |  74156 |       1 |   96 |        |         |          0 |  1434519808 |     1
-     10 | 16384 |  74156 |       1 |   96 |        |         |          0 |  1549990478 |     1
-     10 | 16384 |  74156 |       1 |   96 |        |         |          0 |  -467598540 |     1
-     10 | 16384 |  74156 |       1 |   96 |        |         |          0 |  2056384448 |     1
+ro=# select * from pg_qualstats;
+ userid | dbid  | lrelid | lattnum | opno | rrelid | rattnum | parenthash  |  nodehash  | count | queryid | constvalue  
+--------+-------+--------+---------+------+--------+---------+-------------+------------+-------+---------+-------------
+     10 | 16546 |   1262 |       1 |   93 |        |         |  1167468204 | -312474735 |     1 |         | 12::integer
+     10 | 16546 |        |         |  607 |   1262 |      -2 | -1449854762 | 1327480291 |     1 |         | 
 ```
 
 
@@ -143,7 +144,7 @@ ro=# select * from pg_qualstats_indexes;
 Todo
 ----
 
-- TEST! TEST! TEST!
+- Test, and ensure it doesnt crash
 - Add pg_qualstats_foreignkeys for suggesting FKs (frequently joined together
   columns)
 - Normalize queries to eliminate constants
