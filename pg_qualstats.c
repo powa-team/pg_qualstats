@@ -137,7 +137,7 @@ _PG_init(void)
 			"Sets the maximum number of statements tracked by pg_qualstats.",
 							NULL,
 							&pgqs_max,
-							10000,
+							1000,
 							100,
 							INT_MAX,
 							PGC_POSTMASTER,
