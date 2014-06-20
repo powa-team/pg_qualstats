@@ -93,7 +93,7 @@ typedef struct pgqsHashKey
 	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
 								 * otherwise. */
 	uint32		nodehash;		/* Hash of the node itself */
-	uint32		queryid;		/* query identifier (if set by another plugin */
+	int64		queryid;		/* query identifier (if set by another plugin */
 }	pgqsHashKey;
 
 
@@ -694,7 +694,7 @@ pg_qualstats(PG_FUNCTION_ARGS)
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->key.queryid);
+			values[i++] = Int64GetDatum(entry->key.queryid);
 		}
 		if (entry->constvalue)
 		{

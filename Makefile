@@ -7,10 +7,7 @@ DOCS         = $(wildcard doc/*.md)
 MODULES      = $(patsubst %.c,%,$(wildcard *.c))
 PG_CONFIG    = pg_config
 
-all: $(EXTENSION)--$(EXTVERSION).sql
-
-$(EXTENSION)--$(EXTVERSION).sql: $(EXTENSION).sql
-	cp $< $@
+all:
 
 release-zip: all
 	git archive --format zip --prefix=pg_qualstats-$(EXTVERSION)/ --output ./pg_qualstats-$(EXTVERSION).zip HEAD
@@ -21,7 +18,6 @@ release-zip: all
 	rm ./pg_qualstats-$(EXTVERSION) -rf
 
 
-DATA = $(wildcard *--*.sql) $(EXTENSION)--$(EXTVERSION).sql
-EXTRA_CLEAN = $(EXTENSION)--$(EXTVERSION).sql
+DATA = $(wildcard *--*.sql)
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
