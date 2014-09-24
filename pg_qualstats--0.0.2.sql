@@ -35,8 +35,8 @@ REVOKE ALL ON FUNCTION pg_qualstats_reset() FROM PUBLIC;
 
 
 CREATE VIEW pg_qualstats_pretty AS
-  select 
-		nl.nspname as left_schema,	
+  select
+		nl.nspname as left_schema,
         al.attrelid::regclass as left_table,
         al.attname as left_column,
         opno::regoper as operator,
@@ -50,38 +50,54 @@ CREATE VIEW pg_qualstats_pretty AS
   left join pg_attribute al on al.attrelid = qs.lrelid and al.attnum = qs.lattnum
   left join pg_attribute ar on ar.attrelid = qs.rrelid and ar.attnum = qs.rattnum
   group by al.attrelid, al.attname, ar.attrelid, ar.attname, opno, nl.nspname, nr.nspname
-  ;
+;
 
 
 
-CREATE VIEW pg_qualstats_all AS 
-  SELECT relid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
+CREATE OR REPLACE VIEW pg_qualstats_all AS
+  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
 	coalesce(parenthash, nodehash) as nodehash, mode() within group (order by queryid)  as most_frequent_query
   FROM (
     SELECT
+          qs.dbid,
           qs.lrelid as relid,
+          qs.userid as userid,
           qs.lattnum as attnum,
           qs.opno as opno,
 		  qs.parenthash as parenthash,
 		  qs.nodehash as nodehash,
           qs.count as count,
           qs.queryid
-    FROM pg_qualstats qs
+    FROM pg_qualstats() qs
     WHERE qs.lrelid IS NOT NULL
     UNION ALL
-    SELECT qs.rrelid as relid,
+    SELECT
+          qs.dbid,
+          qs.rrelid as relid,
+          qs.userid as userid,
           qs.rattnum as attnum,
           qs.opno as opno,
 		  qs.parenthash as parenthash,
 		  qs.nodehash as nodehash,
           count as count,
           qs.queryid
-    FROM pg_qualstats qs
+    FROM pg_qualstats() qs
     WHERE qs.rrelid IS NOT NULL
-  ) t GROUP BY relid, opno, coalesce(parenthash, nodehash)
+  ) t GROUP BY dbid, relid, userid, queryid, opno, coalesce(parenthash, nodehash)
 ;
 
-CREATE VIEW pg_qualstats_indexes AS 
+CREATE VIEW pg_qualstats_by_query AS
+SELECT dbid, relid, queryid, attnums, most_frequent_query, sum(count) as count
+FROM (
+  SELECT dbid, qs.relid::regclass, queryid, max(count) as count, attnums,
+  most_frequent_query
+  FROM pg_qualstats_all as qs
+  GROUP BY dbid, qs.relid, queryid, nodehash, most_frequent_query, qs.attnums
+) t GROUP BY dbid, relid, queryid, attnums, most_frequent_query;
+
+
+
+CREATE VIEW pg_qualstats_indexes AS
 SELECT relid::regclass, attnames, possible_types, most_frequent_query, sum(count) as count
 FROM (
   SELECT qs.relid::regclass, array_agg(distinct attnames) as attnames, array_agg(distinct amname) as possible_types, max(count) as count, array_agg(distinct attnum) as attnums,
@@ -96,7 +112,7 @@ FROM (
     WHERE indrelid = relid AND (
 		(i.indkey::int2[])[0:array_length(attnums, 1) - 1] @> (attnums::int2[]) OR
 		((attnums::int2[]) @> (i.indkey::int2[])[0:array_length(indkey, 1) + 1]  AND
-			i.indisunique)) 
+			i.indisunique))
   )
   GROUP BY qs.relid, nodehash, most_frequent_query
 ) t GROUP BY relid, attnames, possible_types, most_frequent_query;
