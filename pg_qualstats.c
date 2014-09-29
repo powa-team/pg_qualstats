@@ -77,8 +77,8 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
 
 static int	pgqs_max;			/* max # statements to track */
-static bool pgqs_track_pgcatalog; /* track queries on pg_catalog */
-static bool pgqs_resolve_oids; /* resolve oids */
+static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
+static bool pgqs_resolve_oids;	/* resolve oids */
 
 
 
@@ -110,14 +110,14 @@ typedef struct pgqsHashKey
 
 typedef struct pgqsNames
 {
-	NameData 	rolname;
+	NameData	rolname;
 	NameData	datname;
-	NameData		lrelname;
-	NameData		lattname;
-	NameData		opname;
-	NameData		rrelname;
-	NameData		rattname;
-} pgqsNames;
+	NameData	lrelname;
+	NameData	lattname;
+	NameData	opname;
+	NameData	rrelname;
+	NameData	rattname;
+}	pgqsNames;
 
 
 typedef struct pgqsEntry
@@ -127,7 +127,7 @@ typedef struct pgqsEntry
 												 * the right hand constant, if
 												 * any */
 	int64		count;
-	double 		usage;
+	double		usage;
 }	pgqsEntry;
 
 typedef struct pgqsEntryWithNames
@@ -178,26 +178,26 @@ _PG_init(void)
 							NULL,
 							NULL);
 	DefineCustomBoolVariable("pg_qualstats.resolve_oids",
-			"Store names alongside the oid. Eats MUCH more space!",
-			NULL,
-			&pgqs_resolve_oids,
-			false,
-			PGC_POSTMASTER,
-			0,
-			NULL,
-			NULL,
-			NULL);
+					  "Store names alongside the oid. Eats MUCH more space!",
+							 NULL,
+							 &pgqs_resolve_oids,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	DefineCustomBoolVariable("pg_qualstats.track_pg_catalog",
-			"Track quals on system catalogs too.",
-			NULL,
-			&pgqs_track_pgcatalog,
-			true,
-			PGC_SUSET,
-			0,
-			NULL,
-			NULL,
-			NULL);
+							 "Track quals on system catalogs too.",
+							 NULL,
+							 &pgqs_track_pgcatalog,
+							 true,
+							 PGC_SUSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 }
 
 void
@@ -210,47 +210,56 @@ _PG_fini(void)
 
 
 void
-pgqs_fillnames(pgqsEntryWithNames* entry)
+pgqs_fillnames(pgqsEntryWithNames * entry)
 {
-	HeapTuple tp;
+	HeapTuple	tp;
+
 	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid));
 	namestrcpy(&(entry->names.datname), get_database_name(entry->entry.key.dbid));
-	if(entry->entry.key.lrelid != InvalidOid){
+	if (entry->entry.key.lrelid != InvalidOid)
+	{
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.lrelid));
-		if(!HeapTupleIsValid(tp)){
+		if (!HeapTupleIsValid(tp))
+		{
 			elog(ERROR, "Invalid lreloid");
 		}
-		namecpy(&(entry->names.lrelname),	&(((Form_pg_class) GETSTRUCT(tp))->relname));
+		namecpy(&(entry->names.lrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.lrelid),
-				entry->entry.key.lattnum);
-		if(!HeapTupleIsValid(tp)){
+							 entry->entry.key.lattnum);
+		if (!HeapTupleIsValid(tp))
+		{
 			elog(ERROR, "Invalid lattr");
 		}
-		namecpy(&(entry->names.lattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
+		namecpy(&(entry->names.lattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
 	}
-	if(entry->entry.key.opoid != InvalidOid){
+	if (entry->entry.key.opoid != InvalidOid)
+	{
 		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.key.opoid));
-		if(!HeapTupleIsValid(tp)){
+		if (!HeapTupleIsValid(tp))
+		{
 			elog(ERROR, "Invalid operator");
 		}
-		namecpy(&(entry->names.opname),	&(((Form_pg_operator) GETSTRUCT(tp))->oprname));
+		namecpy(&(entry->names.opname), &(((Form_pg_operator) GETSTRUCT(tp))->oprname));
 		ReleaseSysCache(tp);
 	}
-	if(entry->entry.key.rrelid != InvalidOid){
+	if (entry->entry.key.rrelid != InvalidOid)
+	{
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.rrelid));
-		if(!HeapTupleIsValid(tp)){
+		if (!HeapTupleIsValid(tp))
+		{
 			elog(ERROR, "Invalid rreloid");
 		}
-		namecpy(&(entry->names.rrelname),		&(((Form_pg_class) GETSTRUCT(tp))->relname));
+		namecpy(&(entry->names.rrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.rrelid),
-				entry->entry.key.rattnum);
-		if(!HeapTupleIsValid(tp)){
+							 entry->entry.key.rattnum);
+		if (!HeapTupleIsValid(tp))
+		{
 			elog(ERROR, "Invalid rattr");
 		}
-		namecpy(&(entry->names.rattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
+		namecpy(&(entry->names.rattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
 	}
 }
@@ -295,7 +304,7 @@ pgqs_entry_dealloc(void)
 	pgqsEntry  *entry;
 	int			nvictims;
 	int			i;
-	int 		base_size;
+	int			base_size;
 
 	/*
 	 * Sort entries by usage and deallocate PGQS_USAGE_DEALLOC_PERCENT of
@@ -303,10 +312,13 @@ pgqs_entry_dealloc(void)
 	 * usage values.
 	 */
 
-	if(pgqs_resolve_oids){
+	if (pgqs_resolve_oids)
+	{
 		base_size = sizeof(pgqsEntryWithNames *);
-	} else {
-		base_size = sizeof(pgqsEntry*);
+	}
+	else
+	{
+		base_size = sizeof(pgqsEntry *);
 	}
 
 	entries = palloc(hash_get_num_entries(pgqs_hash) * base_size);
@@ -593,26 +605,33 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			pgqsEntry  *entry;
 
-			if(!pgqs_track_pgcatalog)
+			if (!pgqs_track_pgcatalog)
 			{
-				HeapTuple tp;
-				if(key.lrelid != InvalidOid){
+				HeapTuple	tp;
+
+				if (key.lrelid != InvalidOid)
+				{
 					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.lrelid));
-					if(!HeapTupleIsValid(tp)){
+					if (!HeapTupleIsValid(tp))
+					{
 						elog(ERROR, "Invalid reloid");
 					}
-					if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
+					{
 						ReleaseSysCache(tp);
 						return NULL;
 					}
 					ReleaseSysCache(tp);
 				}
-				if(key.rrelid != InvalidOid){
+				if (key.rrelid != InvalidOid)
+				{
 					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.rrelid));
-					if(!HeapTupleIsValid(tp)){
+					if (!HeapTupleIsValid(tp))
+					{
 						elog(ERROR, "Invalid reloid");
 					}
-					if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
+					{
 						ReleaseSysCache(tp);
 						return NULL;
 					}
@@ -632,8 +651,9 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 					get_const_expr(constant, buf);
 					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				}
-				if(pgqs_resolve_oids){
-					pgqs_fillnames((pgqsEntryWithNames*)entry);
+				if (pgqs_resolve_oids)
+				{
+					pgqs_fillnames((pgqsEntryWithNames *) entry);
 				}
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 					pgqs_entry_dealloc();
@@ -710,9 +730,12 @@ pgqs_shmem_startup(void)
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	memset(&info, 0, sizeof(info));
 	info.keysize = sizeof(pgqsHashKey);
-	if(pgqs_resolve_oids){
+	if (pgqs_resolve_oids)
+	{
 		info.entrysize = sizeof(pgqsEntryWithNames);
-	} else {
+	}
+	else
+	{
 		info.entrysize = sizeof(pgqsEntry);
 	}
 	info.hash = pgqs_hash_fn;
@@ -769,15 +792,15 @@ Datum
 pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-	int nb_columns = PGQS_COLUMNS;
+	int			nb_columns = PGQS_COLUMNS;
 	TupleDesc	tupdesc;
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry  *entry;
-	Datum		*values;
-	bool		*nulls;
+	Datum	   *values;
+	bool	   *nulls;
 
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
@@ -805,7 +828,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	rsinfo->setDesc = tupdesc;
 	hash_seq_init(&hash_seq, pgqs_hash);
 	LWLockAcquire(pgqs->lock, LW_SHARED);
-	if(include_names){
+	if (include_names)
+	{
 		nb_columns += PGQS_NAME_COLUMNS;
 	}
 
@@ -814,6 +838,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		int			i = 0;
+
 		memset(values, 0, sizeof(Datum) * nb_columns);
 		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
@@ -866,8 +891,10 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		{
 			nulls[i++] = true;
 		}
-		if(include_names){
-			pgqsNames names = ((pgqsEntryWithNames *) entry)->names;
+		if (include_names)
+		{
+			pgqsNames	names = ((pgqsEntryWithNames *) entry)->names;
+
 			values[i++] = CStringGetTextDatum(NameStr(names.rolname));
 			values[i++] = CStringGetTextDatum(NameStr(names.datname));
 			values[i++] = CStringGetTextDatum(NameStr(names.lrelname));
