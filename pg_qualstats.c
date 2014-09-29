@@ -218,14 +218,14 @@ pgqs_fillnames(pgqsEntryWithNames* entry)
 	if(entry->entry.key.lrelid != InvalidOid){
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.lrelid));
 		if(!HeapTupleIsValid(tp)){
-			elog(ERROR, "Invalid reloid");
+			elog(ERROR, "Invalid lreloid");
 		}
 		namecpy(&(entry->names.lrelname),	&(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.lrelid),
 				entry->entry.key.lattnum);
 		if(!HeapTupleIsValid(tp)){
-			elog(ERROR, "Invalid attr");
+			elog(ERROR, "Invalid lattr");
 		}
 		namecpy(&(entry->names.lattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
@@ -241,14 +241,14 @@ pgqs_fillnames(pgqsEntryWithNames* entry)
 	if(entry->entry.key.rrelid != InvalidOid){
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.rrelid));
 		if(!HeapTupleIsValid(tp)){
-			elog(ERROR, "Invalid reloid");
+			elog(ERROR, "Invalid rreloid");
 		}
 		namecpy(&(entry->names.rrelname),		&(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.rrelid),
 				entry->entry.key.rattnum);
 		if(!HeapTupleIsValid(tp)){
-			elog(ERROR, "Invalid attr");
+			elog(ERROR, "Invalid rattr");
 		}
 		namecpy(&(entry->names.rattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
@@ -595,15 +595,18 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 			if(!pgqs_track_pgcatalog)
 			{
-				HeapTuple tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.lrelid));
-				if(!HeapTupleIsValid(tp)){
-					elog(ERROR, "Invalid reloid");
-				}
-				if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+				HeapTuple tp;
+				if(key.lrelid != InvalidOid){
+					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.lrelid));
+					if(!HeapTupleIsValid(tp)){
+						elog(ERROR, "Invalid reloid");
+					}
+					if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+						ReleaseSysCache(tp);
+						return NULL;
+					}
 					ReleaseSysCache(tp);
-					return NULL;
 				}
-				ReleaseSysCache(tp);
 				if(key.rrelid != InvalidOid){
 					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.rrelid));
 					if(!HeapTupleIsValid(tp)){
