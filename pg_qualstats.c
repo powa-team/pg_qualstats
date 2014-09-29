@@ -77,6 +77,7 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
 
 static int	pgqs_max;			/* max # statements to track */
+static bool pgqs_track_pgcatalog; /* track queries on pg_catalog */
 static bool pgqs_resolve_oids; /* resolve oids */
 
 
@@ -187,6 +188,16 @@ _PG_init(void)
 			NULL,
 			NULL);
 
+	DefineCustomBoolVariable("pg_qualstats.track_pg_catalog",
+			"Track quals on system catalogs too.",
+			NULL,
+			&pgqs_track_pgcatalog,
+			true,
+			PGC_SUSET,
+			0,
+			NULL,
+			NULL,
+			NULL);
 }
 
 void
@@ -582,7 +593,29 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			pgqsEntry  *entry;
 
-
+			if(!pgqs_track_pgcatalog)
+			{
+				HeapTuple tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.lrelid));
+				if(!HeapTupleIsValid(tp)){
+					elog(ERROR, "Invalid reloid");
+				}
+				if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+					ReleaseSysCache(tp);
+					return NULL;
+				}
+				ReleaseSysCache(tp);
+				if(key.rrelid != InvalidOid){
+					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.rrelid));
+					if(!HeapTupleIsValid(tp)){
+						elog(ERROR, "Invalid reloid");
+					}
+					if(((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE){
+						ReleaseSysCache(tp);
+						return NULL;
+					}
+					ReleaseSysCache(tp);
+				}
+			}
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
