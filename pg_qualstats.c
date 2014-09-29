@@ -708,9 +708,9 @@ pgqs_shmem_startup(void)
 	memset(&info, 0, sizeof(info));
 	info.keysize = sizeof(pgqsHashKey);
 	if(pgqs_resolve_oids){
-		info.entrysize = sizeof(pgqsEntry);
-	} else {
 		info.entrysize = sizeof(pgqsEntryWithNames);
+	} else {
+		info.entrysize = sizeof(pgqsEntry);
 	}
 	info.hash = pgqs_hash_fn;
 	pgqs = ShmemInitStruct("pg_qualstats",
