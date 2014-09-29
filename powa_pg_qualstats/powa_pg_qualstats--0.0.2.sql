@@ -1,5 +1,4 @@
 CREATE TYPE pg_qualstats_history AS (
-  ts timestamp with time zone,
   relid oid,
   attnums int[],
   opno oid,
@@ -13,7 +12,6 @@ CREATE TYPE pg_qualstats_history AS (
 CREATE TABLE powaqualstats_history_by_query (
   dbname name,
   queryid bigint,
-  coalesce_range tstzrange,
   records pg_qualstats_history[]
 );
 
@@ -46,17 +44,15 @@ BEGIN
   ),
   missing_statements AS (
       INSERT INTO powaqualstats_statements (queryid, md5query, rolname, dbname, query)
-        SELECT DISTINCT c.queryid, md5(rolname||datname||query), rolname, datname, ss.query
+        SELECT DISTINCT c.queryid, md5(rolname||dbname||query), rolname, dbname, ss.query
         FROM capture c INNER JOIN pg_stat_statements ss on ss.queryid = c.queryid
-		INNER JOIN pg_roles on pg_roles.oid = c.userid
-		INNER JOIN pg_database on pg_database.oid = c.dbid
         WHERE NOT EXISTS (SELECT 1
                           FROM powaqualstats_statements
                           WHERE powaqualstats_statements.queryid = c.queryid)
   ),
   by_query AS (
     INSERT INTO powaqualstats_history_by_query_current (dbname, queryid, pg_qualstat_history_record)
-      SELECT datname, queryid, row(now(), relid, attnums,  opno, count::int)::pg_qualstats_history
+      SELECT datname, queryid, row(relid, attnums,  opno, relname, attnames, opname, count::int)::pg_qualstats_history
       FROM pg_qualstats_by_query inner join pg_database on pg_database.oid = dbid
   )
   SELECT true into result;
@@ -68,14 +64,15 @@ BEGIN
   RAISE DEBUG 'running powaqualstats_statements_aggregate';
   LOCK TABLE powaqualstats_history_by_query_current IN SHARE MODE;
   INSERT INTO powaqualstats_history_by_query
-    SELECT dbname, queryid, tstzrange(min((pg_qualstat_history_record).ts), max((pg_qualstat_history_record).ts), '[]'),
-      array_agg(pg_qualstat_history_record)
-    FROM powaqualstats_history_by_query_current
+    SELECT dbname, queryid, array_agg(pg_qualstat_history_record)
+    FROM powaqualstats_history_by_query_current c
+	WHERE NOT EXISTS (SELECT 1
+		FROM powaqualstats_history_by_query hq
+		WHERE hq.queryid = c.queryid AND hq.dbname = c.dbname)
     GROUP BY dbname, queryid;
   TRUNCATE powaqualstats_history_by_query_current;
 END
 $PROC$ language plpgsql;
-
 
 CREATE OR REPLACE FUNCTION powaqualstats_purge() RETURNS void as $PROC$
 BEGIN
