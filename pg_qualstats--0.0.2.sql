@@ -113,14 +113,12 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
 ;
 
 CREATE VIEW pg_qualstats_by_query AS
-SELECT dbid, relid, queryid, attnums, most_frequent_query, sum(count) as count
+SELECT dbid, relid, queryid, attnums, most_frequent_query, sum(count) as count, opno
 FROM (
-  SELECT dbid, qs.relid::regclass, queryid, max(count) as count, attnums,
-  most_frequent_query
+  SELECT dbid, qs.relid::regclass, queryid, max(count) as count, attnums, opno, most_frequent_query
   FROM pg_qualstats_all as qs
-  GROUP BY dbid, qs.relid, queryid, nodehash, most_frequent_query, qs.attnums
-) t GROUP BY dbid, relid, queryid, attnums, most_frequent_query;
-
+  GROUP BY dbid, qs.relid, queryid, nodehash, most_frequent_query, qs.attnums, opno
+) t GROUP BY dbid, relid, queryid, attnums, most_frequent_query, opno;
 
 
 CREATE VIEW pg_qualstats_indexes AS

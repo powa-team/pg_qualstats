@@ -2,6 +2,7 @@ CREATE TYPE pg_qualstats_history AS (
   ts timestamp with time zone,
   relid oid,
   attnums int[],
+  opno oid,
   count bigint
 );
 
@@ -26,7 +27,10 @@ CREATE TABLE powaqualstats_statements (
   md5query text,
   rolname text not null,
   dbname text not null,
-  query text not null
+  query text not null,
+  relid oid,
+  attnums int[],
+  opno oid
 );
 
 CREATE OR REPLACE FUNCTION powaqualstats_take_statements_snaphot() RETURNS void as $PROC$
@@ -49,7 +53,7 @@ BEGIN
   ),
   by_query AS (
     INSERT INTO powaqualstats_history_by_query_current (dbname, queryid, pg_qualstat_history_record)
-      SELECT datname, queryid, row(now(), relid, attnums,  count::int)::pg_qualstats_history
+      SELECT datname, queryid, row(now(), relid, attnums,  opno, count::int)::pg_qualstats_history
       FROM pg_qualstats_by_query inner join pg_database on pg_database.oid = dbid
   )
   SELECT true into result;
@@ -83,4 +87,3 @@ SELECT pg_catalog.pg_extension_config_dump('powaqualstats_history_by_query_curre
 
 
 INSERT INTO powa_functions VALUES ('snapshot','powaqualstats_take_statements_snaphot',false),('aggregate','powaqualstats_aggregate',false),('purge','powaqualstats_purge',false);
-
