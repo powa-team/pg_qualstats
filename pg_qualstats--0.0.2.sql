@@ -37,10 +37,10 @@ CREATE FUNCTION pg_qualstats_names(
   OUT rolname text,
   OUT dbname text,
   OUT lrelname text,
-  OUT lattr	text,
-  OUT operator text,
+  OUT lattname	text,
+  OUT opname text,
   OUT rrelname text,
-  OUT rattr text
+  OUT rattname text
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
@@ -113,12 +113,45 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
 ;
 
 CREATE VIEW pg_qualstats_by_query AS
-SELECT dbid, relid, queryid, attnums, most_frequent_query, sum(count) as count, opno
-FROM (
-  SELECT dbid, qs.relid::regclass, queryid, max(count) as count, attnums, opno, most_frequent_query
-  FROM pg_qualstats_all as qs
-  GROUP BY dbid, qs.relid, queryid, nodehash, most_frequent_query, qs.attnums, opno
-) t GROUP BY dbid, relid, queryid, attnums, most_frequent_query, opno;
+	SELECT dbid, relid, userid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
+		coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname
+	FROM (
+		SELECT
+			qs.dbid,
+			qs.lrelid as relid,
+			qs.userid as userid,
+			qs.lattnum as attnum,
+			qs.opno as opno,
+			qs.parenthash as parenthash,
+			qs.nodehash as nodehash,
+			qs.count as count,
+			qs.queryid as queryid,
+			qs.dbname as dbname,
+			qs.rolname as rolname,
+			qs.lrelname as relname,
+			qs.lattname as attname,
+			qs.opname as opname
+		FROM pg_qualstats_names() qs
+		WHERE qs.lrelid IS NOT NULL
+		UNION ALL
+		SELECT
+			qs.dbid,
+			qs.rrelid as relid,
+			qs.userid as userid,
+			qs.rattnum as attnum,
+			qs.opno as opno,
+			qs.parenthash as parenthash,
+			qs.nodehash as nodehash,
+			count as count,
+			qs.queryid as queryid,
+			qs.dbname as dbname,
+			qs.rolname as rolname,
+			qs.rrelname as relname,
+			qs.rattname as attname,
+			qs.opname as opname
+		FROM pg_qualstats_names() qs
+		WHERE qs.rrelid IS NOT NULL
+	) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname;
 
 
 CREATE VIEW pg_qualstats_indexes AS

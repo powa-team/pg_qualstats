@@ -3,6 +3,9 @@ CREATE TYPE pg_qualstats_history AS (
   relid oid,
   attnums int[],
   opno oid,
+  relname text,
+  attnames text[],
+  opname   text,
   count bigint
 );
 
@@ -39,7 +42,7 @@ DECLARE
 BEGIN
   RAISE DEBUG 'running powaqualstats_take_statements_snaphot';
   WITH capture AS (
-    SELECT * FROM pg_qualstats()
+    SELECT * FROM pg_qualstats_names()
   ),
   missing_statements AS (
       INSERT INTO powaqualstats_statements (queryid, md5query, rolname, dbname, query)
