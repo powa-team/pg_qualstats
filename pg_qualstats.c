@@ -16,7 +16,12 @@
  */
 #include "postgres.h"
 #include "access/hash.h"
+#include "access/htup_details.h"
+#include "catalog/pg_class.h"
+#include "catalog/pg_namespace.h"
+#include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
+#include "commands/dbcommands.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
@@ -25,8 +30,8 @@
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
-#include "parser/parse_node.h"
 #include "parser/analyze.h"
+#include "parser/parse_node.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "utils/array.h"
@@ -34,12 +39,13 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/syscache.h"
 #include "utils/tuplestore.h"
-
 
 PG_MODULE_MAGIC;
 
 #define PGQS_COLUMNS 12
+#define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
@@ -51,9 +57,12 @@ void		_PG_fini(void);
 
 extern Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats(PG_FUNCTION_ARGS);
+extern Datum pg_qualstats_names(PG_FUNCTION_ARGS);
+static Datum pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names);
 
 PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
+PG_FUNCTION_INFO_V1(pg_qualstats_names);
 
 
 
@@ -68,6 +77,7 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
 
 static int	pgqs_max;			/* max # statements to track */
+static bool pgqs_resolve_oids; /* resolve oids */
 
 
 
@@ -97,6 +107,18 @@ typedef struct pgqsHashKey
 }	pgqsHashKey;
 
 
+typedef struct pgqsNames
+{
+	NameData 	rolname;
+	NameData	datname;
+	NameData		lrelname;
+	NameData		lattname;
+	NameData		opname;
+	NameData		rrelname;
+	NameData		rattname;
+} pgqsNames;
+
+
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
@@ -104,7 +126,15 @@ typedef struct pgqsEntry
 												 * the right hand constant, if
 												 * any */
 	int64		count;
+	double 		usage;
 }	pgqsEntry;
+
+typedef struct pgqsEntryWithNames
+{
+	pgqsEntry	entry;
+	pgqsNames	names;
+}	pgqsEntryWithNames;
+
 
 
 typedef struct pgqsWalkerContext
@@ -117,7 +147,8 @@ static bool pgqs_query_tree_walker(Node *node, pgqsWalkerContext * query);
 static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
 static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
-static void entry_dealloc(void);
+static void pgqs_entry_dealloc(void);
+static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
 
 /* Global Hash */
@@ -145,6 +176,17 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+	DefineCustomBoolVariable("pg_qualstats.resolve_oids",
+			"Store names alongside the oid. Eats MUCH more space!",
+			NULL,
+			&pgqs_resolve_oids,
+			false,
+			PGC_POSTMASTER,
+			0,
+			NULL,
+			NULL,
+			NULL);
+
 }
 
 void
@@ -153,6 +195,53 @@ _PG_fini(void)
 	/* Uninstall hooks. */
 	shmem_startup_hook = prev_shmem_startup_hook;
 	planner_hook = prev_planner_hook;
+}
+
+
+void
+pgqs_fillnames(pgqsEntryWithNames* entry)
+{
+	HeapTuple tp;
+	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid));
+	namestrcpy(&(entry->names.datname), get_database_name(entry->entry.key.dbid));
+	if(entry->entry.key.lrelid != InvalidOid){
+		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.lrelid));
+		if(!HeapTupleIsValid(tp)){
+			elog(ERROR, "Invalid reloid");
+		}
+		namecpy(&(entry->names.lrelname),	&(((Form_pg_class) GETSTRUCT(tp))->relname));
+		ReleaseSysCache(tp);
+		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.lrelid),
+				entry->entry.key.lattnum);
+		if(!HeapTupleIsValid(tp)){
+			elog(ERROR, "Invalid attr");
+		}
+		namecpy(&(entry->names.lattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
+		ReleaseSysCache(tp);
+	}
+	if(entry->entry.key.opoid != InvalidOid){
+		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.key.opoid));
+		if(!HeapTupleIsValid(tp)){
+			elog(ERROR, "Invalid operator");
+		}
+		namecpy(&(entry->names.opname),	&(((Form_pg_operator) GETSTRUCT(tp))->oprname));
+		ReleaseSysCache(tp);
+	}
+	if(entry->entry.key.rrelid != InvalidOid){
+		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.rrelid));
+		if(!HeapTupleIsValid(tp)){
+			elog(ERROR, "Invalid reloid");
+		}
+		namecpy(&(entry->names.rrelname),		&(((Form_pg_class) GETSTRUCT(tp))->relname));
+		ReleaseSysCache(tp);
+		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.rrelid),
+				entry->entry.key.rattnum);
+		if(!HeapTupleIsValid(tp)){
+			elog(ERROR, "Invalid attr");
+		}
+		namecpy(&(entry->names.rattname),	&(((Form_pg_attribute) GETSTRUCT(tp))->attname));
+		ReleaseSysCache(tp);
+	}
 }
 
 static PlannedStmt *
@@ -188,13 +277,14 @@ entry_cmp(const void *lhs, const void *rhs)
 }
 
 static void
-entry_dealloc(void)
+pgqs_entry_dealloc(void)
 {
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry **entries;
 	pgqsEntry  *entry;
 	int			nvictims;
 	int			i;
+	int 		base_size;
 
 	/*
 	 * Sort entries by usage and deallocate PGQS_USAGE_DEALLOC_PERCENT of
@@ -202,16 +292,22 @@ entry_dealloc(void)
 	 * usage values.
 	 */
 
-	entries = palloc(hash_get_num_entries(pgqs_hash) * sizeof(pgqsEntry *));
+	if(pgqs_resolve_oids){
+		base_size = sizeof(pgqsEntryWithNames *);
+	} else {
+		base_size = sizeof(pgqsEntry*);
+	}
 
+	entries = palloc(hash_get_num_entries(pgqs_hash) * base_size);
 	i = 0;
 	hash_seq_init(&hash_seq, pgqs_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		entries[i++] = entry;
+		entry->usage *= 0.99;
 	}
 
-	qsort(entries, i, sizeof(pgqsEntry *), entry_cmp);
+	qsort(entries, i, base_size, entry_cmp);
 
 	nvictims = Max(10, i * PGQS_USAGE_DEALLOC_PERCENT / 100);
 	nvictims = Min(nvictims, i);
@@ -220,7 +316,6 @@ entry_dealloc(void)
 	{
 		hash_search(pgqs_hash, &entries[i]->key, HASH_REMOVE, NULL);
 	}
-
 	pfree(entries);
 }
 
@@ -487,11 +582,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			pgqsEntry  *entry;
 
+
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
 			{
 				entry->count = 0;
+				entry->usage = 0;
 				if (constant != NULL)
 				{
 					StringInfo	buf = makeStringInfo();
@@ -499,10 +596,14 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 					get_const_expr(constant, buf);
 					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				}
+				if(pgqs_resolve_oids){
+					pgqs_fillnames((pgqsEntryWithNames*)entry);
+				}
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
-					entry_dealloc();
+					pgqs_entry_dealloc();
 			}
 			entry->count += 1;
+			entry->usage += 1;
 			LWLockRelease(pgqs->lock);
 			return entry;
 		}
@@ -573,7 +674,11 @@ pgqs_shmem_startup(void)
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	memset(&info, 0, sizeof(info));
 	info.keysize = sizeof(pgqsHashKey);
-	info.entrysize = sizeof(pgqsEntry);
+	if(pgqs_resolve_oids){
+		info.entrysize = sizeof(pgqsEntry);
+	} else {
+		info.entrysize = sizeof(pgqsEntryWithNames);
+	}
 	info.hash = pgqs_hash_fn;
 	pgqs = ShmemInitStruct("pg_qualstats",
 						   sizeof(pgqsSharedState),
@@ -610,16 +715,33 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+
+Datum
+pg_qualstats_names(PG_FUNCTION_ARGS)
+{
+	return pg_qualstats_common(fcinfo, true);
+}
+
 Datum
 pg_qualstats(PG_FUNCTION_ARGS)
 {
+	return pg_qualstats_common(fcinfo, false);
+}
+
+
+Datum
+pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
+{
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	int nb_columns = PGQS_COLUMNS;
 	TupleDesc	tupdesc;
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry  *entry;
+	Datum		*values;
+	bool		*nulls;
 
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
@@ -647,14 +769,17 @@ pg_qualstats(PG_FUNCTION_ARGS)
 	rsinfo->setDesc = tupdesc;
 	hash_seq_init(&hash_seq, pgqs_hash);
 	LWLockAcquire(pgqs->lock, LW_SHARED);
+	if(include_names){
+		nb_columns += PGQS_NAME_COLUMNS;
+	}
+
+	values = palloc0(sizeof(Datum) * nb_columns);
+	nulls = palloc0(sizeof(bool) * nb_columns);;
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		Datum		values[PGQS_COLUMNS];
-		bool		nulls[PGQS_COLUMNS];
 		int			i = 0;
-
-		memset(values, 0, sizeof(values));
-		memset(nulls, 0, sizeof(nulls));
+		memset(values, 0, sizeof(Datum) * nb_columns);
+		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
 		if (entry->key.lattnum != InvalidAttrNumber)
@@ -705,13 +830,26 @@ pg_qualstats(PG_FUNCTION_ARGS)
 		{
 			nulls[i++] = true;
 		}
+		if(include_names){
+			pgqsNames names = ((pgqsEntryWithNames *) entry)->names;
+			values[i++] = CStringGetTextDatum(NameStr(names.rolname));
+			values[i++] = CStringGetTextDatum(NameStr(names.datname));
+			values[i++] = CStringGetTextDatum(NameStr(names.lrelname));
+			values[i++] = CStringGetTextDatum(NameStr(names.lattname));
+			values[i++] = CStringGetTextDatum(NameStr(names.opname));
+			values[i++] = CStringGetTextDatum(NameStr(names.rrelname));
+			values[i++] = CStringGetTextDatum(NameStr(names.rattname));
+		}
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 	LWLockRelease(pgqs->lock);
 	tuplestore_donestoring(tupstore);
 	MemoryContextSwitchTo(oldcontext);
 	return (Datum) 0;
+
+
 }
+
 
 /*
  * Calculate hash value for a key

@@ -21,6 +21,32 @@ RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT VOLATILE;
 
+CREATE FUNCTION pg_qualstats_names(
+  OUT userid oid,
+  OUT dbid oid,
+  OUT lrelid oid,
+  OUT lattnum smallint,
+  OUT opno oid,
+  OUT rrelid oid,
+  OUT rattnum smallint,
+  OUT parenthash  bigint,
+  OUT nodehash 	  bigint,
+  OUT count bigint,
+  OUT queryid	 bigint,
+  OUT constvalue varchar,
+  OUT rolname text,
+  OUT dbname text,
+  OUT lrelname text,
+  OUT lattr	text,
+  OUT operator text,
+  OUT rrelname text,
+  OUT rattr text
+)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT VOLATILE;
+
+
 -- Register a view on the function for ease of use.
 CREATE VIEW pg_qualstats AS
   SELECT qs.* FROM pg_qualstats() qs
