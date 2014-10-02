@@ -295,6 +295,7 @@ static void pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	context->queryId = queryDesc->plannedstmt->queryId;
 	context->rtable = queryDesc->plannedstmt->rtable;
 	context->count = 0;
+	context->parenthash = 0;
 	context->filter_ratio = -1;
 	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	if (prev_ExecutorEnd)
@@ -385,9 +386,14 @@ pgqs_collectNodeStats(PlanState *planstate, List * ancestors, pgqsWalkerContext 
 		case T_IndexOnlyScan:
 		case T_BitmapIndexScan:
 		case T_ModifyTable:
+			if(list_length(plan->qual) > 1){
+				char * noderepr = nodeToString(plan->qual);
+				context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
+			}
 			context->count = planstate->instrument->ntuples + planstate->instrument->nfiltered1;
 			context->filter_ratio = planstate->instrument->nfiltered1 / context->count;
 			expression_tree_walker((Node *) plan->qual, pgqs_whereclause_tree_walker, context);
+			context->parenthash = 0;
 			context->count = oldcount;
 			context->filter_ratio = oldratio;
 			break;
