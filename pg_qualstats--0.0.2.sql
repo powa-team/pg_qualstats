@@ -33,6 +33,7 @@ CREATE FUNCTION pg_qualstats_names(
   OUT parenthash  bigint,
   OUT nodehash 	  bigint,
   OUT count bigint,
+  OUT filter_ratio float8,
   OUT queryid	 bigint,
   OUT constvalue varchar,
   OUT rolname text,
