@@ -44,7 +44,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 12
+#define PGQS_COLUMNS 13
 #define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
@@ -64,13 +64,12 @@ PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
 PG_FUNCTION_INFO_V1(pg_qualstats_names);
 
-
-
-static PlannedStmt *pgqs_planner(Query *query, int cursorOptions, ParamListInfo boundParams);
 static void pgqs_shmem_startup(void);
+static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static void pgqs_ExecutorEnd(QueryDesc *queryDesc);
 
-
-static planner_hook_type prev_planner_hook = NULL;
+static ExecutorStart_hook_type prev_ExecutorStart = NULL;
+static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
@@ -127,6 +126,7 @@ typedef struct pgqsEntry
 												 * the right hand constant, if
 												 * any */
 	int64		count;
+	double		filter_ratio;
 	double		usage;
 }	pgqsEntry;
 
@@ -138,16 +138,24 @@ typedef struct pgqsEntryWithNames
 
 
 
+
 typedef struct pgqsWalkerContext
 {
-	Query	   *query;
-	uint32		parenthash;
-}	pgqsWalkerContext;
+       uint32 queryId;
+	   List *rtable;
+       uint32          parenthash;
+	   int64	count;
+	   double 	filter_ratio;
+}      pgqsWalkerContext;
 
-static bool pgqs_query_tree_walker(Node *node, pgqsWalkerContext * query);
+
 static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
 static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
+static void pgqs_collectNodeStats(PlanState *planstate, List * ancestors, pgqsWalkerContext *context);
+static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext *context);
+static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext *context);
+
 static void pgqs_entry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
@@ -161,8 +169,11 @@ static pgqsSharedState *pgqs = NULL;
 void
 _PG_init(void)
 {
-	prev_planner_hook = planner_hook;
-	planner_hook = pgqs_planner;
+	prev_ExecutorStart = ExecutorStart_hook;
+	ExecutorStart_hook = pgqs_ExecutorStart;
+	prev_ExecutorEnd = ExecutorEnd_hook;
+	ExecutorEnd_hook = pgqs_ExecutorEnd;
+
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
 	DefineCustomIntVariable("pg_qualstats.max",
@@ -205,7 +216,8 @@ _PG_fini(void)
 {
 	/* Uninstall hooks. */
 	shmem_startup_hook = prev_shmem_startup_hook;
-	planner_hook = prev_planner_hook;
+	ExecutorStart_hook = prev_ExecutorStart;
+	ExecutorEnd_hook = prev_ExecutorEnd;
 }
 
 
@@ -264,23 +276,33 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 	}
 }
 
-static PlannedStmt *
-pgqs_planner(Query *parse,
-			 int cursorOptions,
-			 ParamListInfo boundParams)
+static void
+pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
-	PlannedStmt *plannedstmt = NULL;
-	pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
-
-	if (prev_planner_hook)
-		plannedstmt = prev_planner_hook(parse, cursorOptions, boundParams);
+	/* Setup instrumentation */
+	queryDesc->instrument_options |= INSTRUMENT_ROWS;
+	queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
+	if (prev_ExecutorStart)
+		prev_ExecutorStart(queryDesc, eflags);
 	else
-		plannedstmt = standard_planner(parse, cursorOptions, boundParams);
-	context->query = parse;
-	context->parenthash = 0;
-	query_or_expression_tree_walker((Node *) parse, pgqs_query_tree_walker, context, 0);
-	return plannedstmt;
+		standard_ExecutorStart(queryDesc, eflags);
+
 }
+
+static void pgqs_ExecutorEnd(QueryDesc *queryDesc)
+{
+	pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
+	context->queryId = queryDesc->plannedstmt->queryId;
+	context->rtable = queryDesc->plannedstmt->rtable;
+	context->count = 0;
+	context->filter_ratio = -1;
+	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
+	if (prev_ExecutorEnd)
+		prev_ExecutorEnd(queryDesc);
+	else
+		standard_ExecutorEnd(queryDesc);
+}
+
 
 static int
 entry_cmp(const void *lhs, const void *rhs)
@@ -342,42 +364,111 @@ pgqs_entry_dealloc(void)
 	pfree(entries);
 }
 
-
-static bool
-pgqs_query_tree_walker(Node *node, pgqsWalkerContext * context)
+static void
+pgqs_collectNodeStats(PlanState *planstate, List * ancestors, pgqsWalkerContext *context)
 {
-	char	   *noderepr;
+	Plan *plan = planstate->plan;
+	int64 oldcount = context->count;
+	double oldratio = context->filter_ratio;
+	switch(nodeTag(plan))
+	{
+		case T_SeqScan:
+		case T_BitmapHeapScan:
+		case T_TidScan:
+		case T_SubqueryScan:
+		case T_FunctionScan:
+		case T_ValuesScan:
+		case T_CteScan:
+		case T_WorkTableScan:
+		case T_ForeignScan:
+		case T_IndexScan:
+		case T_IndexOnlyScan:
+		case T_BitmapIndexScan:
+		case T_ModifyTable:
+			context->count = planstate->instrument->ntuples + planstate->instrument->nfiltered1;
+			context->filter_ratio = planstate->instrument->nfiltered1 / context->count;
+			expression_tree_walker((Node *) plan->qual, pgqs_whereclause_tree_walker, context);
+			context->count = oldcount;
+			context->filter_ratio = oldratio;
+			break;
+		case T_NestLoop:
+		case T_MergeJoin:
+		case T_HashJoin:
+			/* TODO: compute more stuff */
+			break;
+		default:
+			break;
 
-	if (node == NULL)
-	{
-		return false;
 	}
-	switch (node->type)
+	/* lefttree */
+	if (outerPlanState(planstate))
+		pgqs_collectNodeStats(outerPlanState(planstate), ancestors, context);
+
+	/* righttree */
+	if (innerPlanState(planstate))
+		pgqs_collectNodeStats(innerPlanState(planstate), ancestors, context);
+	/* special child plans */
+	switch (nodeTag(plan))
 	{
-		case T_FromExpr:
-			noderepr = nodeToString(((FromExpr *) node)->quals);
-			context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
-			pgqs_whereclause_tree_walker(((FromExpr *) node)->quals, context);
-			context->parenthash = 0;
-			expression_tree_walker((Node *) ((FromExpr *) node)->fromlist, pgqs_query_tree_walker, context);
+		case T_ModifyTable:
+			pgqs_collectMemberNodeStats(((ModifyTable *) plan)->plans,
+							   ((ModifyTableState *) planstate)->mt_plans,
+							   ancestors, context);
 			break;
-		case T_JoinExpr:
-			noderepr = nodeToString(((JoinExpr *) node)->quals);
-			context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
-			pgqs_whereclause_tree_walker(((JoinExpr *) node)->quals, context);
-			context->parenthash = 0;
-			expression_tree_walker((Node *) ((JoinExpr *) node)->larg, pgqs_query_tree_walker, context);
-			expression_tree_walker((Node *) ((JoinExpr *) node)->rarg, pgqs_query_tree_walker, context);
+		case T_Append:
+			pgqs_collectMemberNodeStats(((Append *) plan)->appendplans,
+							   ((AppendState *) planstate)->appendplans,
+							   ancestors, context);
 			break;
-		case T_SubLink:
-			query_or_expression_tree_walker(((SubLink *) node)->subselect, pgqs_query_tree_walker, context, 0);
+		case T_MergeAppend:
+			pgqs_collectMemberNodeStats(((MergeAppend *) plan)->mergeplans,
+							   ((MergeAppendState *) planstate)->mergeplans,
+							   ancestors, context);
+			break;
+		case T_BitmapAnd:
+			pgqs_collectMemberNodeStats(((BitmapAnd *) plan)->bitmapplans,
+							   ((BitmapAndState *) planstate)->bitmapplans,
+							   ancestors, context);
+			break;
+		case T_BitmapOr:
+			pgqs_collectMemberNodeStats(((BitmapOr *) plan)->bitmapplans,
+							   ((BitmapOrState *) planstate)->bitmapplans,
+							   ancestors, context);
+			break;
+		case T_SubqueryScan:
+			pgqs_collectNodeStats(((SubqueryScanState *) planstate)->subplan, ancestors, context);
 			break;
 		default:
 			break;
 	}
-	return false;
+
+	/* subPlan-s */
+	if (planstate->subPlan)
+		pgqs_collectSubPlanStats(planstate->subPlan, ancestors, context);
 }
 
+static void
+pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
+				   List *ancestors, pgqsWalkerContext * context)
+{
+	int			nplans = list_length(plans);
+	int			j;
+
+	for (j = 0; j < nplans; j++)
+		pgqs_collectNodeStats(planstates[j], ancestors, context);
+}
+
+static void
+pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext *context)
+{
+	ListCell   *lst;
+
+	foreach(lst, plans)
+	{
+		SubPlanState *sps = (SubPlanState *) lfirst(lst);
+		pgqs_collectNodeStats(sps->planstate, ancestors, context);
+	}
+}
 
 static pgqsEntry *
 pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context)
@@ -413,11 +504,8 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 	}
 	if (len > 0)
 	{
+		context->count *= len;
 		entry = pgqs_process_opexpr(op, context);
-		if (entry != NULL)
-		{
-			entry->count += len - 1;
-		}
 	}
 	return entry;
 }
@@ -537,7 +625,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.rrelid = InvalidOid;
 		key.parenthash = context->parenthash;
 		key.nodehash = hash_any((unsigned char *) noderepr, strlen(noderepr));
-		key.queryid = context->query->queryId;
+		key.queryid = context->queryId;
 		if (IsA(node, RelabelType))
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
@@ -548,7 +636,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				var = (Var *) node;
 				{
 					/* Register it */
-					RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
+					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
 					if (rte->rtekind == RTE_RELATION)
 					{
@@ -589,7 +677,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			case T_Var:
 				var = (Var *) node;
 				{
-					RangeTblEntry *rte = list_nth(context->query->rtable, var->varno - 1);
+					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
 					*sreliddest = rte->relid;
 					*sattnumdest = var->varattno;
@@ -643,6 +731,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			if (!found)
 			{
 				entry->count = 0;
+				entry->filter_ratio = -1;
 				entry->usage = 0;
 				if (constant != NULL)
 				{
@@ -658,8 +747,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 					pgqs_entry_dealloc();
 			}
-			entry->count += 1;
-			entry->usage += 1;
+			if(entry->filter_ratio > -1){
+				entry->filter_ratio = ((entry->filter_ratio * entry->count) + (context->filter_ratio * context->count)) / (entry->count + context->count);
+			} else {
+				entry->filter_ratio = context->filter_ratio;
+			}
+			entry->count += context->count;
+			entry->usage += context->count;
 			LWLockRelease(pgqs->lock);
 			return entry;
 		}
@@ -686,9 +780,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 					uint32		previous_hash = context->parenthash;
 
 					context->parenthash = 0;
-					/* Trampoline to pgqs_query_tree_walker, looking for */
-					/* subqueries */
-					expression_tree_walker(node, pgqs_query_tree_walker, context);
+					expression_tree_walker((Node*)boolexpr->args, pgqs_whereclause_tree_walker, context);
 					context->parenthash = previous_hash;
 					return false;
 				}
@@ -702,7 +794,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 
 					context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 				}
-				expression_tree_walker(node, pgqs_whereclause_tree_walker, context);
+				expression_tree_walker((Node*)boolexpr->args, pgqs_whereclause_tree_walker, context);
 				return false;
 			}
 		case T_OpExpr:
@@ -874,6 +966,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		values[i++] = UInt32GetDatum(entry->key.nodehash);
 		values[i++] = Int64GetDatumFast(entry->count);
+		values[i++] = Float8GetDatumFast(entry->filter_ratio);
 		if (entry->key.queryid == 0)
 		{
 			nulls[i++] = true;
@@ -909,8 +1002,6 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	tuplestore_donestoring(tupstore);
 	MemoryContextSwitchTo(oldcontext);
 	return (Datum) 0;
-
-
 }
 
 
