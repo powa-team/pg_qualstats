@@ -86,7 +86,7 @@ CREATE VIEW pg_qualstats_pretty AS
 
 CREATE OR REPLACE VIEW pg_qualstats_all AS
   SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-    coalesce(parenthash, nodehash) as nodehash, mode() within group (order by queryid)  as most_frequent_query
+    coalesce(parenthash, nodehash) as nodehash
   FROM (
     SELECT
           qs.dbid,
@@ -161,10 +161,9 @@ CREATE VIEW pg_qualstats_by_query AS
 
 
 CREATE VIEW pg_qualstats_indexes AS
-SELECT relid::regclass, attnames, possible_types, most_frequent_query, sum(count) as count
+SELECT relid::regclass, attnames, possible_types, sum(count) as count
 FROM (
-  SELECT qs.relid::regclass, array_agg(distinct attnames) as attnames, array_agg(distinct amname) as possible_types, max(count) as count, array_agg(distinct attnum) as attnums,
-  most_frequent_query
+  SELECT qs.relid::regclass, array_agg(distinct attnames) as attnames, array_agg(distinct amname) as possible_types, max(count) as count, array_agg(distinct attnum) as attnums
   FROM pg_qualstats_all as qs
   INNER JOIN pg_amop amop ON amop.amopopr = opno
   INNER JOIN pg_am on amop.amopmethod = pg_am.oid,
@@ -177,8 +176,8 @@ FROM (
         ((attnums::int2[]) @> (i.indkey::int2[])[0:array_length(indkey, 1) + 1]  AND
             i.indisunique))
   )
-  GROUP BY qs.relid, nodehash, most_frequent_query
-) t GROUP BY relid, attnames, possible_types, most_frequent_query;
+  GROUP BY qs.relid, nodehash
+) t GROUP BY relid, attnames, possible_types;
 
 
 
