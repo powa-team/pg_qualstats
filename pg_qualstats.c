@@ -373,6 +373,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	Plan	   *plan = planstate->plan;
 	int64		oldcount = context->count;
 	double		oldratio = context->filter_ratio;
+	double 		total_filtered = 0;
 
 	switch (nodeTag(plan))
 	{
@@ -392,11 +393,15 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			if (list_length(plan->qual) > 1)
 			{
 				char	   *noderepr = nodeToString(plan->qual);
-
 				context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
 			}
-			context->count = planstate->instrument->ntuples + planstate->instrument->nfiltered1;
-			context->filter_ratio = planstate->instrument->nfiltered1 / context->count;
+			total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
+			context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
+			if (total_filtered == 0){
+				context->filter_ratio = 0;
+			} else {
+				context->filter_ratio = total_filtered / context->count;
+			}
 			expression_tree_walker((Node *) plan->qual, pgqs_whereclause_tree_walker, context);
 			context->parenthash = 0;
 			context->count = oldcount;
