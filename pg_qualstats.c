@@ -45,7 +45,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 13
+#define PGQS_COLUMNS 14
 #define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
@@ -130,6 +130,7 @@ typedef struct pgqsEntry
 												 * any */
 	int64		count;
 	double		filter_ratio;
+	int			position;
 	double		usage;
 }	pgqsEntry;
 
@@ -762,11 +763,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->count = 0;
 				entry->filter_ratio = -1;
 				entry->usage = 0;
+				entry->position = 0;
+				entry->constvalue[0] = 0;
 				if (constant != NULL)
 				{
 					StringInfo	buf = makeStringInfo();
-
 					get_const_expr(constant, buf);
+					entry->position = constant->location;
 					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				}
 				if (pgqs_resolve_oids)
@@ -995,6 +998,14 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = UInt32GetDatum(entry->key.nodehash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
+		if(entry->position == 0)
+		{
+			nulls[i++] = true;
+		}
+		else
+		{
+			values[i++] = Int32GetDatum(entry->position);
+		}
 		if (entry->key.queryid == 0)
 		{
 			nulls[i++] = true;
