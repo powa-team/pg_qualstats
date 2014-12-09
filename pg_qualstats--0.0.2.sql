@@ -116,7 +116,7 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
 
 CREATE VIEW pg_qualstats_by_query AS
 	SELECT dbid, relid, userid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-		coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname
+		coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname, constvalue
 	FROM (
 		SELECT
 			qs.dbid,
@@ -132,7 +132,8 @@ CREATE VIEW pg_qualstats_by_query AS
 			qs.rolname as rolname,
 			qs.lrelname as relname,
 			qs.lattname as attname,
-			qs.opname as opname
+			qs.opname as opname,
+            qs.constvalue as constvalue
 		FROM pg_qualstats_names() qs
 		WHERE qs.lrelid IS NOT NULL
 		UNION ALL
@@ -150,10 +151,11 @@ CREATE VIEW pg_qualstats_by_query AS
 			qs.rolname as rolname,
 			qs.rrelname as relname,
 			qs.rattname as attname,
-			qs.opname as opname
+			qs.opname as opname,
+            qs.constvalue as constvalue
 		FROM pg_qualstats_names() qs
 		WHERE qs.rrelid IS NOT NULL
-	) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname;
+	) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname, constvalue;
 
 
 CREATE VIEW pg_qualstats_indexes AS

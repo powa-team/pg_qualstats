@@ -1,15 +1,18 @@
 CREATE TYPE pg_qualstats_history AS (
+  ts timestamp with time zone,
   relid oid,
   attnums int[],
   opno oid,
   relname text,
   attnames text[],
   opname   text,
-  count bigint
+  count bigint,
+  constvalue text
 );
 
 
 CREATE TABLE powaqualstats_history_by_query (
+  coalesce_range tstzrange,
   dbname name,
   queryid bigint,
   records pg_qualstats_history[]
@@ -52,7 +55,7 @@ BEGIN
   ),
   by_query AS (
     INSERT INTO powaqualstats_history_by_query_current (dbname, queryid, pg_qualstat_history_record)
-      SELECT datname, queryid, row(relid, attnums,  opno, relname, attnames, opname, count::int)::pg_qualstats_history
+      SELECT datname, queryid, row(now(), relid, attnums,  opno, relname, attnames, opname, count::int, constvalue)::pg_qualstats_history
       FROM pg_qualstats_by_query inner join pg_database on pg_database.oid = dbid
   )
   SELECT true into result;
@@ -64,7 +67,7 @@ BEGIN
   RAISE DEBUG 'running powaqualstats_statements_aggregate';
   LOCK TABLE powaqualstats_history_by_query_current IN SHARE MODE;
   INSERT INTO powaqualstats_history_by_query
-    SELECT dbname, queryid, array_agg(pg_qualstat_history_record)
+    SELECT tstzrange(min((pg_qualstat_history_record).ts), max((pg_qualstat_history_record).ts)), dbname, queryid, array_agg(pg_qualstat_history_record)
     FROM powaqualstats_history_by_query_current c
 	WHERE NOT EXISTS (SELECT 1
 		FROM powaqualstats_history_by_query hq
@@ -77,7 +80,7 @@ $PROC$ language plpgsql;
 CREATE OR REPLACE FUNCTION powaqualstats_purge() RETURNS void as $PROC$
 BEGIN
   RAISE DEBUG 'running powaqualstats_purge';
-  DELETE FROM powaqualstats_history_by_query;
+  DELETE FROM powaqualstats_history_by_query WHERE upper(coalesce_range) < (now() - current_setting('powa.retention')::interval);
 END;
 $PROC$ language plpgsql;
 
