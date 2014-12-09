@@ -14,6 +14,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include <limits.h>
 #include "postgres.h"
 #include "access/hash.h"
 #include "access/htup_details.h"
