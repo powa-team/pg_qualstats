@@ -12,10 +12,10 @@ CREATE FUNCTION pg_qualstats(
   OUT rrelid oid,
   OUT rattnum smallint,
   OUT parenthash  bigint,
-  OUT nodehash 	  bigint,
+  OUT nodehash    bigint,
   OUT count bigint,
   OUT filter_ratio float8,
-  OUT queryid	 bigint,
+  OUT queryid    bigint,
   OUT constvalue varchar
 )
 RETURNS SETOF record
@@ -31,15 +31,15 @@ CREATE FUNCTION pg_qualstats_names(
   OUT rrelid oid,
   OUT rattnum smallint,
   OUT parenthash  bigint,
-  OUT nodehash 	  bigint,
+  OUT nodehash    bigint,
   OUT count bigint,
   OUT filter_ratio float8,
-  OUT queryid	 bigint,
+  OUT queryid    bigint,
   OUT constvalue varchar,
   OUT rolname text,
   OUT dbname text,
   OUT lrelname text,
-  OUT lattname	text,
+  OUT lattname  text,
   OUT opname text,
   OUT rrelname text,
   OUT rattname text
@@ -64,14 +64,14 @@ REVOKE ALL ON FUNCTION pg_qualstats_reset() FROM PUBLIC;
 
 CREATE VIEW pg_qualstats_pretty AS
   select
-		nl.nspname as left_schema,
+        nl.nspname as left_schema,
         al.attrelid::regclass as left_table,
         al.attname as left_column,
         opno::regoper as operator,
-		nr.nspname as right_schema,
+        nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
-		sum(count) as count
+        sum(count) as count
   from pg_qualstats qs
   left join (pg_class cl inner join pg_namespace nl on nl.oid = cl.relnamespace) on cl.oid = qs.lrelid
   left join (pg_class cr inner join pg_namespace nr on nr.oid = cr.relnamespace) on cr.oid = qs.rrelid
@@ -84,7 +84,7 @@ CREATE VIEW pg_qualstats_pretty AS
 
 CREATE OR REPLACE VIEW pg_qualstats_all AS
   SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-	coalesce(parenthash, nodehash) as nodehash, mode() within group (order by queryid)  as most_frequent_query
+    coalesce(parenthash, nodehash) as nodehash, mode() within group (order by queryid)  as most_frequent_query
   FROM (
     SELECT
           qs.dbid,
@@ -92,8 +92,8 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.userid as userid,
           qs.lattnum as attnum,
           qs.opno as opno,
-		  qs.parenthash as parenthash,
-		  qs.nodehash as nodehash,
+          qs.parenthash as parenthash,
+          qs.nodehash as nodehash,
           qs.count as count,
           qs.queryid
     FROM pg_qualstats() qs
@@ -105,8 +105,8 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.userid as userid,
           qs.rattnum as attnum,
           qs.opno as opno,
-		  qs.parenthash as parenthash,
-		  qs.nodehash as nodehash,
+          qs.parenthash as parenthash,
+          qs.nodehash as nodehash,
           count as count,
           qs.queryid
     FROM pg_qualstats() qs
@@ -115,47 +115,47 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
 ;
 
 CREATE VIEW pg_qualstats_by_query AS
-	SELECT dbid, relid, userid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-		coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname, constvalue
-	FROM (
-		SELECT
-			qs.dbid,
-			qs.lrelid as relid,
-			qs.userid as userid,
-			qs.lattnum as attnum,
-			qs.opno as opno,
-			qs.parenthash as parenthash,
-			qs.nodehash as nodehash,
-			qs.count as count,
-			qs.queryid as queryid,
-			qs.dbname as dbname,
-			qs.rolname as rolname,
-			qs.lrelname as relname,
-			qs.lattname as attname,
-			qs.opname as opname,
+    SELECT dbid, relid, userid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
+        coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname, constvalue
+    FROM (
+        SELECT
+            qs.dbid,
+            qs.lrelid as relid,
+            qs.userid as userid,
+            qs.lattnum as attnum,
+            qs.opno as opno,
+            qs.parenthash as parenthash,
+            qs.nodehash as nodehash,
+            qs.count as count,
+            qs.queryid as queryid,
+            qs.dbname as dbname,
+            qs.rolname as rolname,
+            qs.lrelname as relname,
+            qs.lattname as attname,
+            qs.opname as opname,
             qs.constvalue as constvalue
-		FROM pg_qualstats_names() qs
-		WHERE qs.lrelid IS NOT NULL
-		UNION ALL
-		SELECT
-			qs.dbid,
-			qs.rrelid as relid,
-			qs.userid as userid,
-			qs.rattnum as attnum,
-			qs.opno as opno,
-			qs.parenthash as parenthash,
-			qs.nodehash as nodehash,
-			count as count,
-			qs.queryid as queryid,
-			qs.dbname as dbname,
-			qs.rolname as rolname,
-			qs.rrelname as relname,
-			qs.rattname as attname,
-			qs.opname as opname,
+        FROM pg_qualstats_names() qs
+        WHERE qs.lrelid IS NOT NULL
+        UNION ALL
+        SELECT
+            qs.dbid,
+            qs.rrelid as relid,
+            qs.userid as userid,
+            qs.rattnum as attnum,
+            qs.opno as opno,
+            qs.parenthash as parenthash,
+            qs.nodehash as nodehash,
+            count as count,
+            qs.queryid as queryid,
+            qs.dbname as dbname,
+            qs.rolname as rolname,
+            qs.rrelname as relname,
+            qs.rattname as attname,
+            qs.opname as opname,
             qs.constvalue as constvalue
-		FROM pg_qualstats_names() qs
-		WHERE qs.rrelid IS NOT NULL
-	) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname, constvalue;
+        FROM pg_qualstats_names() qs
+        WHERE qs.rrelid IS NOT NULL
+    ) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname, constvalue;
 
 
 CREATE VIEW pg_qualstats_indexes AS
@@ -171,9 +171,9 @@ FROM (
   WHERE NOT EXISTS (
     SELECT 1 from pg_index i
     WHERE indrelid = relid AND (
-		(i.indkey::int2[])[0:array_length(attnums, 1) - 1] @> (attnums::int2[]) OR
-		((attnums::int2[]) @> (i.indkey::int2[])[0:array_length(indkey, 1) + 1]  AND
-			i.indisunique))
+        (i.indkey::int2[])[0:array_length(attnums, 1) - 1] @> (attnums::int2[]) OR
+        ((attnums::int2[]) @> (i.indkey::int2[])[0:array_length(indkey, 1) + 1]  AND
+            i.indisunique))
   )
   GROUP BY qs.relid, nodehash, most_frequent_query
 ) t GROUP BY relid, attnames, possible_types, most_frequent_query;

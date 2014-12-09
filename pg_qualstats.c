@@ -88,7 +88,7 @@ static bool pgqs_resolve_oids;	/* resolve oids */
 typedef struct pgqsSharedState
 {
 #if PG_VERSION_NUM >= 90400
-	LWLock	   *lock;			/* protects hashtable search/modification */
+	LWLock		*lock;			/* protects hashtable search/modification */
 #else
 	LWLockId	lock;
 #endif
@@ -145,7 +145,7 @@ typedef struct pgqsEntryWithNames
 typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
-	List	   *rtable;
+	List		*rtable;
 	uint32		parenthash;
 	int64		count;
 	double		filter_ratio;
@@ -380,7 +380,7 @@ pgqs_entry_dealloc(void)
 static void
 pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context)
 {
-	Plan	   *plan = planstate->plan;
+	Plan		*plan = planstate->plan;
 	int64		oldcount = context->count;
 	double		oldratio = context->filter_ratio;
 	double 		total_filtered = 0;
@@ -486,7 +486,7 @@ pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
 static void
 pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context)
 {
-	ListCell   *lst;
+	ListCell	*lst;
 
 	foreach(lst, plans)
 	{
@@ -499,10 +499,10 @@ pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * conte
 static pgqsEntry *
 pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context)
 {
-	OpExpr	   *op = makeNode(OpExpr);
+	OpExpr		*op = makeNode(OpExpr);
 	int			len = 0;
 	pgqsEntry  *entry;
-	Expr	   *array = lsecond(expr->args);
+	Expr		*array = lsecond(expr->args);
 
 	op->opno = expr->opno;
 	op->opfuncid = expr->opfuncid;
@@ -541,7 +541,7 @@ get_const_expr(Const *constval, StringInfo buf)
 {
 	Oid			typoutput;
 	bool		typIsVarlena;
-	char	   *extval;
+	char		*extval;
 
 	if (constval->constisnull)
 	{
@@ -633,11 +633,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 {
 	if (list_length(expr->args) == 2)
 	{
-		Node	   *node = linitial(expr->args);
-		Var		   *var = NULL;
-		Const	   *constant = NULL;
+		Node		*node = linitial(expr->args);
+		Var			*var = NULL;
+		Const		*constant = NULL;
 		bool		found;
-		Oid		   *sreliddest = NULL;
+		Oid			*sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
 		pgqsHashKey key;
 
@@ -683,7 +683,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			if (OidIsValid(get_commutator(expr->opno)))
 			{
-				OpExpr	   *temp = copyObject(expr);
+				OpExpr		*temp = copyObject(expr);
 
 				CommuteOpExpr(temp);
 				node = linitial(temp->args);
@@ -804,7 +804,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 	{
 		case T_BoolExpr:
 			{
-				BoolExpr   *boolexpr = (BoolExpr *) node;
+				BoolExpr	*boolexpr = (BoolExpr *) node;
 
 				if (boolexpr->boolop == NOT_EXPR)
 				{
@@ -860,8 +860,8 @@ pgqs_shmem_startup(void)
 	}
 	info.hash = pgqs_hash_fn;
 	pgqs = ShmemInitStruct("pg_qualstats",
-						   sizeof(pgqsSharedState),
-						   &found);
+							sizeof(pgqsSharedState),
+							&found);
 	if (!found)
 	{
 		/* First time through ... */
@@ -919,8 +919,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry  *entry;
-	Datum	   *values;
-	bool	   *nulls;
+	Datum		*values;
+	bool		*nulls;
 
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
