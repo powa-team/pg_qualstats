@@ -199,7 +199,7 @@ RETURN QUERY
            FROM (VALUES (relid, attnums::smallint[], opno)) as qs(relid, attnums, opno)
            LEFT JOIN (pg_class cl JOIN pg_namespace nl ON nl.oid = cl.relnamespace) ON cl.oid = qs.relid
            JOIN pg_amop amop ON amop.amopopr = qs.opno
-           JOIN pg_am ON amop.amopmethod = pg_am.oid,
+           JOIN pg_am ON amop.amopmethod = pg_am.oid AND pg_am.amname <> 'hash',
            LATERAL ( SELECT pg_attribute.attname AS attnames
                        FROM pg_attribute
                        JOIN unnest(qs.attnums) a(a) ON a.a = pg_attribute.attnum AND pg_attribute.attrelid = qs.relid
