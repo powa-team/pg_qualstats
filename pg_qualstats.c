@@ -385,16 +385,17 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	int64		oldcount = context->count;
 	double		oldratio = context->filter_ratio;
 	double 		total_filtered = 0;
+	ListCell *lc;
 
 	switch (nodeTag(plan))
 	{
+		case T_CteScan:
 		case T_SeqScan:
 		case T_BitmapHeapScan:
 		case T_TidScan:
 		case T_SubqueryScan:
 		case T_FunctionScan:
 		case T_ValuesScan:
-		case T_CteScan:
 		case T_WorkTableScan:
 		case T_ForeignScan:
 		case T_IndexScan:
@@ -426,6 +427,12 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			break;
 
 	}
+	foreach(lc, planstate->initPlan)
+	{
+		SubPlanState *sps = (SubPlanState*) lfirst(lc);
+		pgqs_collectNodeStats(sps->planstate, ancestors, context);
+	}
+
 	/* lefttree */
 	if (outerPlanState(planstate))
 		pgqs_collectNodeStats(outerPlanState(planstate), ancestors, context);
@@ -763,7 +770,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->count = 0;
 				entry->filter_ratio = -1;
 				entry->usage = 0;
-				entry->position = 0;
+				entry->position = -1;
 				entry->constvalue[0] = 0;
 				if (constant != NULL)
 				{
@@ -998,7 +1005,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = UInt32GetDatum(entry->key.nodehash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
-		if(entry->position == 0)
+		if(entry->position == -1)
 		{
 			nulls[i++] = true;
 		}
