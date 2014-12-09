@@ -76,6 +76,8 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
 
+
+
 static int	pgqs_max;			/* max # statements to track */
 static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
@@ -96,11 +98,6 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	Oid			lrelid;			/* relation OID or NULL if not var */
-	AttrNumber	lattnum;		/* Attribute Number or NULL if not var */
-	Oid			opoid;			/* Operator OID */
-	Oid			rrelid;			/* relation OID or NULL if not var */
-	AttrNumber	rattnum;		/* Attribute Number or NULL if not var */
 	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
 								 * otherwise. */
 	uint32		nodehash;		/* Hash of the node itself */
@@ -123,6 +120,11 @@ typedef struct pgqsNames
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
+	Oid			lrelid;			/* relation OID or NULL if not var */
+	AttrNumber	lattnum;		/* Attribute Number or NULL if not var */
+	Oid			opoid;			/* Operator OID */
+	Oid			rrelid;			/* relation OID or NULL if not var */
+	AttrNumber	rattnum;		/* Attribute Number or NULL if not var */
 	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
 												 * the right hand constant, if
 												 * any */
@@ -156,6 +158,9 @@ static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWa
 static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
+static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context);
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context);
+
 
 static void pgqs_entry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
@@ -233,17 +238,17 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 
 	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid));
 	namestrcpy(&(entry->names.datname), get_database_name(entry->entry.key.dbid));
-	if (entry->entry.key.lrelid != InvalidOid)
+	if (entry->entry.lrelid != InvalidOid)
 	{
-		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.lrelid));
+		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.lrelid));
 		if (!HeapTupleIsValid(tp))
 		{
 			elog(ERROR, "Invalid lreloid");
 		}
 		namecpy(&(entry->names.lrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
-		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.lrelid),
-							 entry->entry.key.lattnum);
+		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.lrelid),
+							 entry->entry.lattnum);
 		if (!HeapTupleIsValid(tp))
 		{
 			elog(ERROR, "Invalid lattr");
@@ -251,9 +256,9 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 		namecpy(&(entry->names.lattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
 	}
-	if (entry->entry.key.opoid != InvalidOid)
+	if (entry->entry.opoid != InvalidOid)
 	{
-		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.key.opoid));
+		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.opoid));
 		if (!HeapTupleIsValid(tp))
 		{
 			elog(ERROR, "Invalid operator");
@@ -261,17 +266,17 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 		namecpy(&(entry->names.opname), &(((Form_pg_operator) GETSTRUCT(tp))->oprname));
 		ReleaseSysCache(tp);
 	}
-	if (entry->entry.key.rrelid != InvalidOid)
+	if (entry->entry.rrelid != InvalidOid)
 	{
-		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.key.rrelid));
+		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.rrelid));
 		if (!HeapTupleIsValid(tp))
 		{
 			elog(ERROR, "Invalid rreloid");
 		}
 		namecpy(&(entry->names.rrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
-		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.key.rrelid),
-							 entry->entry.key.rattnum);
+		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.rrelid),
+							 entry->entry.rattnum);
 		if (!HeapTupleIsValid(tp))
 		{
 			elog(ERROR, "Invalid rattr");
@@ -397,8 +402,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		case T_ModifyTable:
 			if (list_length(plan->qual) > 1)
 			{
-				char	   *noderepr = nodeToString(plan->qual);
-				context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
+				context->parenthash = hashExpr((Expr*)plan->qual, context);
 			}
 			total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
 			context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
@@ -635,18 +639,19 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		bool		found;
 		Oid		   *sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
-		char	   *noderepr = nodeToString(expr);
 		pgqsHashKey key;
+
+		pgqsEntry  tempentry;
+		tempentry.opoid = expr->opno;
+		tempentry.lattnum = InvalidAttrNumber;
+		tempentry.lrelid = InvalidOid;
+		tempentry.rattnum = InvalidAttrNumber;
+		tempentry.rrelid = InvalidOid;
 
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
-		key.opoid = expr->opno;
-		key.lattnum = InvalidAttrNumber;
-		key.lrelid = InvalidOid;
-		key.rattnum = InvalidAttrNumber;
-		key.rrelid = InvalidOid;
 		key.parenthash = context->parenthash;
-		key.nodehash = hash_any((unsigned char *) noderepr, strlen(noderepr));
+		key.nodehash = hashExpr((Expr*)expr, context);
 		key.queryid = context->queryId;
 		if (IsA(node, RelabelType))
 		{
@@ -662,8 +667,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 					if (rte->rtekind == RTE_RELATION)
 					{
-						key.lrelid = rte->relid;
-						key.lattnum = var->varattno;
+						tempentry.lrelid = rte->relid;
+						tempentry.lattnum = var->varattno;
 					}
 				}
 				break;
@@ -682,16 +687,16 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 				CommuteOpExpr(temp);
 				node = linitial(temp->args);
-				sreliddest = &(key.lrelid);
-				sattnumdest = &(key.lattnum);
+				sreliddest = &(tempentry.lrelid);
+				sattnumdest = &(tempentry.lattnum);
 			}
 		}
 		else
 		{
 
 			node = lsecond(expr->args);
-			sreliddest = &(key.rrelid);
-			sattnumdest = &(key.rattnum);
+			sreliddest = &(tempentry.rrelid);
+			sattnumdest = &(tempentry.rattnum);
 
 		}
 		switch (node->type)
@@ -713,15 +718,16 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		}
 		if (var != NULL)
 		{
-			pgqsEntry  *entry;
 
+			pgqsEntry * entry;
 			if (!pgqs_track_pgcatalog)
 			{
 				HeapTuple	tp;
 
-				if (key.lrelid != InvalidOid)
+
+				if (tempentry.lrelid != InvalidOid)
 				{
-					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.lrelid));
+					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.lrelid));
 					if (!HeapTupleIsValid(tp))
 					{
 						elog(ERROR, "Invalid reloid");
@@ -733,9 +739,9 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 					}
 					ReleaseSysCache(tp);
 				}
-				if (key.rrelid != InvalidOid)
+				if (tempentry.rrelid != InvalidOid)
 				{
-					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(key.rrelid));
+					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.rrelid));
 					if (!HeapTupleIsValid(tp))
 					{
 						elog(ERROR, "Invalid reloid");
@@ -752,6 +758,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
 			{
+				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
 				entry->count = 0;
 				entry->filter_ratio = -1;
 				entry->usage = 0;
@@ -815,9 +822,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 				}
 				if ((boolexpr->boolop == AND_EXPR))
 				{
-					char	   *noderepr = nodeToString(node);
-
-					context->parenthash = hash_any((unsigned char *) noderepr, strlen(noderepr));
+					context->parenthash = hashExpr((Expr*)boolexpr, context);
 				}
 				expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
 				return false;
@@ -958,21 +963,21 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
-		if (entry->key.lattnum != InvalidAttrNumber)
+		if (entry->lattnum != InvalidAttrNumber)
 		{
-			values[i++] = ObjectIdGetDatum(entry->key.lrelid);
-			values[i++] = Int16GetDatum(entry->key.lattnum);
+			values[i++] = ObjectIdGetDatum(entry->lrelid);
+			values[i++] = Int16GetDatum(entry->lattnum);
 		}
 		else
 		{
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}
-		values[i++] = Int16GetDatum(entry->key.opoid);
-		if (entry->key.rattnum != InvalidAttrNumber)
+		values[i++] = Int16GetDatum(entry->opoid);
+		if (entry->rattnum != InvalidAttrNumber)
 		{
-			values[i++] = ObjectIdGetDatum(entry->key.rrelid);
-			values[i++] = Int16GetDatum(entry->key.rattnum);
+			values[i++] = ObjectIdGetDatum(entry->rrelid);
+			values[i++] = Int16GetDatum(entry->rattnum);
 		}
 		else
 		{
@@ -1044,13 +1049,9 @@ pgqs_hash_fn(const void *key, Size keysize)
 
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
-		hash_uint32((uint32) k->opoid) ^
-		hash_uint32((uint32) k->lrelid) ^
-		hash_uint32((uint32) k->lattnum) ^
-		hash_uint32((uint32) k->rrelid) ^
-		hash_uint32((uint32) k->rattnum) ^
-		k->parenthash ^
-		k->nodehash;
+		hash_uint32((uint32) k->nodehash) ^
+		hash_uint32((uint32) k->parenthash) ^
+		hash_uint32((uint32) k->queryid);
 }
 
 /*
@@ -1069,3 +1070,53 @@ pgqs_memsize(void)
 	}
 	return size;
 }
+
+static uint32 hashExpr(Expr* expr, pgqsWalkerContext * context){
+	StringInfo buffer = makeStringInfo();
+	exprRepr(expr, buffer, context);
+	return hash_any((unsigned char *) buffer->data, buffer->len);
+
+}
+
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context)
+{
+
+	ListCell *lc;
+	switch(expr->type)
+	{
+		case T_List:
+			foreach(lc, (List*) expr)
+			{
+				exprRepr((Expr*) lfirst(lc), buffer, context);
+			}
+			break;
+		case T_OpExpr:
+			appendStringInfo(buffer, "%d", ((OpExpr *) expr)->opno);
+			exprRepr((Expr*)((OpExpr*)expr)->args, buffer, context);
+			break;
+		case T_Var:
+			{
+			Var * var = (Var*) expr;
+			RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
+			if (rte->rtekind == RTE_RELATION)
+			{
+				appendStringInfo(buffer, "%d;%d", rte->relid, var->varattno);
+			}
+			else
+			{
+				appendStringInfo(buffer, "NORTE%d;%d", var->varno, var->varattno);
+			}
+			}
+			break;
+		case T_BoolExpr:
+			appendStringInfo(buffer, "%d", ((BoolExpr*)expr)->boolop);
+			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context);
+			break;
+		case T_Const:
+			get_const_expr((Const*)expr, buffer);
+			break;
+		default:
+			appendStringInfoString(buffer, nodeToString(expr));
+	}
+}
+
