@@ -203,7 +203,7 @@ _PG_init(void)
 							 "Track quals on system catalogs too.",
 							 NULL,
 							 &pgqs_track_pgcatalog,
-							 true,
+							 false,
 							 PGC_SUSET,
 							 0,
 							 NULL,
