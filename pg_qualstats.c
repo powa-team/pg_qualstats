@@ -160,6 +160,8 @@ static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerCon
 static void pgqs_entry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
+static Size pgqs_memsize(void);
+
 
 /* Global Hash */
 static HTAB *pgqs_hash = NULL;
@@ -174,7 +176,6 @@ _PG_init(void)
 	ExecutorStart_hook = pgqs_ExecutorStart;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
-
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
 	DefineCustomIntVariable("pg_qualstats.max",
@@ -210,6 +211,9 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+
+	RequestAddinShmemSpace(pgqs_memsize());
+
 }
 
 void
@@ -835,10 +839,8 @@ pgqs_shmem_startup(void)
 {
 	HASHCTL		info;
 	bool		found;
-
 	if (prev_shmem_startup_hook)
 		prev_shmem_startup_hook();
-
 	pgqs = NULL;
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	memset(&info, 0, sizeof(info));
@@ -1007,15 +1009,21 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		if (include_names)
 		{
-			pgqsNames	names = ((pgqsEntryWithNames *) entry)->names;
-
-			values[i++] = CStringGetTextDatum(NameStr(names.rolname));
-			values[i++] = CStringGetTextDatum(NameStr(names.datname));
-			values[i++] = CStringGetTextDatum(NameStr(names.lrelname));
-			values[i++] = CStringGetTextDatum(NameStr(names.lattname));
-			values[i++] = CStringGetTextDatum(NameStr(names.opname));
-			values[i++] = CStringGetTextDatum(NameStr(names.rrelname));
-			values[i++] = CStringGetTextDatum(NameStr(names.rattname));
+			if(pgqs_resolve_oids)
+			{
+				pgqsNames	names = ((pgqsEntryWithNames *) entry)->names;
+				values[i++] = CStringGetTextDatum(NameStr(names.rolname));
+				values[i++] = CStringGetTextDatum(NameStr(names.datname));
+				values[i++] = CStringGetTextDatum(NameStr(names.lrelname));
+				values[i++] = CStringGetTextDatum(NameStr(names.lattname));
+				values[i++] = CStringGetTextDatum(NameStr(names.opname));
+				values[i++] = CStringGetTextDatum(NameStr(names.rrelname));
+				values[i++] = CStringGetTextDatum(NameStr(names.rattname));
+			} else {
+				for(; i < nb_columns; i++){
+					nulls[i] = true;
+				}
+			}
 		}
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
@@ -1043,4 +1051,21 @@ pgqs_hash_fn(const void *key, Size keysize)
 		hash_uint32((uint32) k->rattnum) ^
 		k->parenthash ^
 		k->nodehash;
+}
+
+/*
+ * Estimate shared memory space needed.
+ */
+static Size
+pgqs_memsize(void)
+{
+	Size		size;
+
+	size = MAXALIGN(sizeof(pgqsSharedState));
+	if(pgqs_resolve_oids){
+		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntryWithNames)));
+	} else {
+		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntry)));
+	}
+	return size;
 }

@@ -24,11 +24,11 @@ CREATE TABLE powaqualstats_history_by_query_current (
 
 -- TODO: merge with powa_statements
 CREATE TABLE powaqualstats_statements (
-  queryid bigint,
-  md5query text,
-  rolname text not null,
-  dbname text not null,
-  query text not null,
+  queryid bigint not null,
+  md5query text not null,
+  rolname text,
+  dbname text,
+  query text,
   relid oid,
   attnums int[],
   opno oid
@@ -86,4 +86,4 @@ SELECT pg_catalog.pg_extension_config_dump('powaqualstats_history_by_query','');
 SELECT pg_catalog.pg_extension_config_dump('powaqualstats_history_by_query_current','');
 
 
-INSERT INTO powa_functions VALUES ('snapshot','powaqualstats_take_statements_snaphot',false),('aggregate','powaqualstats_aggregate',false),('purge','powaqualstats_purge',false);
+INSERT INTO powa_functions VALUES ('snapshot','powaqualstats_take_statements_snaphot',false),('aggregate','powaqualstats_statements_aggregate',false),('purge','powaqualstats_purge',false);
