@@ -45,7 +45,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 14
+#define PGQS_COLUMNS 15
 #define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
@@ -102,6 +102,8 @@ typedef struct pgqsHashKey
 								 * otherwise. */
 	uint32		nodehash;		/* Hash of the node itself */
 	int64		queryid;		/* query identifier (if set by another plugin */
+	uint32 		consthash; 		/* Hash of the const */
+	uint32		parentconsthash; /* Hash of the parent, including the consts */
 }	pgqsHashKey;
 
 
@@ -148,6 +150,7 @@ typedef struct pgqsWalkerContext
 	uint32		queryId;
 	List		*rtable;
 	uint32		parenthash;
+	uint32		parentconsthash; /* Hash of the parent, including the consts */
 	int64		count;
 	double		filter_ratio;
 }	pgqsWalkerContext;
@@ -159,8 +162,8 @@ static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWa
 static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
-static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context);
-static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context);
+static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context, bool include_const);
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include_const);
 
 
 static void pgqs_entry_dealloc(void);
@@ -309,6 +312,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	context->rtable = queryDesc->plannedstmt->rtable;
 	context->count = 0;
 	context->parenthash = 0;
+	context->parentconsthash = 0;
 	context->filter_ratio = -1;
 	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	if (prev_ExecutorEnd)
@@ -404,7 +408,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		case T_ModifyTable:
 			if (list_length(plan->qual) > 1)
 			{
-				context->parenthash = hashExpr((Expr*)plan->qual, context);
+				context->parentconsthash = hashExpr((Expr*)plan->qual, context, true);
+				context->parenthash = hashExpr((Expr*)plan->qual, context, false);
 			}
 			total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
 			context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
@@ -415,6 +420,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			}
 			expression_tree_walker((Node *) plan->qual, pgqs_whereclause_tree_walker, context);
 			context->parenthash = 0;
+			context->parentconsthash = 0;
 			context->count = oldcount;
 			context->filter_ratio = oldratio;
 			break;
@@ -647,6 +653,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		bool		found;
 		Oid			*sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
+		int 		position = -1;
+		StringInfo	buf = makeStringInfo();
 		pgqsHashKey key;
 
 		pgqsEntry  tempentry;
@@ -659,8 +667,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
 		key.parenthash = context->parenthash;
-		key.nodehash = hashExpr((Expr*)expr, context);
+		key.parentconsthash = context->parentconsthash;
+		key.nodehash = hashExpr((Expr*)expr, context, false);
 		key.queryid = context->queryId;
+		key.consthash = 0;
 		if (IsA(node, RelabelType))
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
@@ -763,6 +773,12 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				}
 			}
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+			if (constant != NULL)
+			{
+				get_const_expr(constant, buf);
+				position = constant->location;
+				key.consthash = hash_any((unsigned char*) buf->data, buf->len);
+			}
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
 			{
@@ -770,15 +786,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->count = 0;
 				entry->filter_ratio = -1;
 				entry->usage = 0;
-				entry->position = -1;
-				entry->constvalue[0] = 0;
-				if (constant != NULL)
-				{
-					StringInfo	buf = makeStringInfo();
-					get_const_expr(constant, buf);
-					entry->position = constant->location;
-					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
-				}
+				entry->position = position;
+				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				if (pgqs_resolve_oids)
 				{
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
@@ -820,19 +829,24 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 				{
 					/* Skip, and do not keep track of the qual */
 					uint32		previous_hash = context->parenthash;
+					uint32		previous_consthash = context->parentconsthash;
 
 					context->parenthash = 0;
+					context->parentconsthash = 0;
 					expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
 					context->parenthash = previous_hash;
+					context->parentconsthash = previous_consthash;
 					return false;
 				}
 				if (boolexpr->boolop == OR_EXPR)
 				{
 					context->parenthash = 0;
+					context->parentconsthash = 0;
 				}
 				if ((boolexpr->boolop == AND_EXPR))
 				{
-					context->parenthash = hashExpr((Expr*)boolexpr, context);
+					context->parentconsthash = hashExpr((Expr*)boolexpr, context, true);
+					context->parenthash = hashExpr((Expr*)boolexpr, context, false);
 				}
 				expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
 				return false;
@@ -1002,6 +1016,14 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		{
 			values[i++] = UInt32GetDatum(entry->key.parenthash);
 		}
+		if (entry->key.parentconsthash == 0)
+		{
+			nulls[i++] = true;
+		}
+		else
+		{
+			values[i++] = UInt32GetDatum(entry->key.parentconsthash);
+		}
 		values[i++] = UInt32GetDatum(entry->key.nodehash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
@@ -1064,12 +1086,13 @@ static uint32
 pgqs_hash_fn(const void *key, Size keysize)
 {
 	const pgqsHashKey *k = (const pgqsHashKey *) key;
-
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
-		hash_uint32((uint32) k->nodehash) ^
 		hash_uint32((uint32) k->parenthash) ^
-		hash_uint32((uint32) k->queryid);
+		hash_uint32((uint32) k->queryid) ^
+		hash_uint32((uint32) k->nodehash) ^
+		hash_uint32((uint32) k->consthash) ^
+		hash_uint32((uint32) k->parentconsthash);
 }
 
 /*
@@ -1089,14 +1112,14 @@ pgqs_memsize(void)
 	return size;
 }
 
-static uint32 hashExpr(Expr* expr, pgqsWalkerContext * context){
+static uint32 hashExpr(Expr* expr, pgqsWalkerContext * context, bool include_const){
 	StringInfo buffer = makeStringInfo();
-	exprRepr(expr, buffer, context);
+	exprRepr(expr, buffer, context, include_const);
 	return hash_any((unsigned char *) buffer->data, buffer->len);
 
 }
 
-static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context)
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const)
 {
 
 	ListCell *lc;
@@ -1105,12 +1128,12 @@ static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context)
 		case T_List:
 			foreach(lc, (List*) expr)
 			{
-				exprRepr((Expr*) lfirst(lc), buffer, context);
+				exprRepr((Expr*) lfirst(lc), buffer, context, include_const);
 			}
 			break;
 		case T_OpExpr:
 			appendStringInfo(buffer, "%d", ((OpExpr *) expr)->opno);
-			exprRepr((Expr*)((OpExpr*)expr)->args, buffer, context);
+			exprRepr((Expr*)((OpExpr*)expr)->args, buffer, context, include_const);
 			break;
 		case T_Var:
 			{
@@ -1128,12 +1151,16 @@ static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context)
 			break;
 		case T_BoolExpr:
 			appendStringInfo(buffer, "%d", ((BoolExpr*)expr)->boolop);
-			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context);
+			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context, include_const);
 			break;
 		case T_Const:
+			if(include_const){
+				get_const_expr((Const*)expr, buffer);
+			} else {
+				appendStringInfoChar(buffer, '?');
+			}
 			break;
 		default:
 			appendStringInfoString(buffer, nodeToString(expr));
 	}
 }
-
