@@ -1,4 +1,0 @@
-comment = 'PoWA integratino for pg_qualstats'
-default_version = '0.0.2'
-relocatable = true
-requires = 'powa, pg_qualstats'
