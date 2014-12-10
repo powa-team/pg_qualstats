@@ -117,8 +117,8 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
 ;
 
 CREATE VIEW pg_qualstats_by_query AS
-    SELECT dbid, relid, userid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-        coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(distinct attname) as attnames, opname, constvalue
+    SELECT dbid, relid, userid, array_agg(attnum order by attnum) as attnums, array_agg(opno order by attnum) as opnos, max(parenthash) as parenthash, max(count) as count, max(filter_ratio) as filter_ratio,
+        coalesce(parenthash, nodehash) as nodehash, t.queryid, dbname, rolname, relname, array_agg(attname order by attnum) as attnames, array_agg(opname order by attnum) as opnames, array_agg(constvalue order by attnum) as constvalues
     FROM (
         SELECT
             qs.dbid,
@@ -135,7 +135,8 @@ CREATE VIEW pg_qualstats_by_query AS
             qs.lrelname as relname,
             qs.lattname as attname,
             qs.opname as opname,
-            qs.constvalue as constvalue
+            qs.constvalue as constvalue,
+            qs.filter_ratio as filter_ratio
         FROM pg_qualstats_names() qs
         WHERE qs.lrelid IS NOT NULL
         UNION ALL
@@ -154,10 +155,11 @@ CREATE VIEW pg_qualstats_by_query AS
             qs.rrelname as relname,
             qs.rattname as attname,
             qs.opname as opname,
-            qs.constvalue as constvalue
+            qs.constvalue as constvalue,
+            qs.filter_ratio as filter_ratio
         FROM pg_qualstats_names() qs
         WHERE qs.rrelid IS NOT NULL
-    ) t GROUP BY dbid, relid, userid, t.queryid, opno, coalesce(parenthash, nodehash), rolname, relname, attname, opname, dbname, constvalue;
+    ) t GROUP BY dbid, relid, userid, t.queryid, coalesce(parenthash, nodehash), dbname, relname, rolname;
 
 
 CREATE VIEW pg_qualstats_indexes AS
