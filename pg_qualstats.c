@@ -1131,7 +1131,6 @@ static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context)
 			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context);
 			break;
 		case T_Const:
-			get_const_expr((Const*)expr, buffer);
 			break;
 		default:
 			appendStringInfoString(buffer, nodeToString(expr));
