@@ -14,6 +14,7 @@ CREATE FUNCTION pg_qualstats(
   OUT parenthash  bigint,
   OUT parentconsthash bigint,
   OUT nodehash    bigint,
+  OUT consthash bigint,
   OUT count bigint,
   OUT filter_ratio float8,
   OUT constant_position int,
@@ -35,6 +36,7 @@ CREATE FUNCTION pg_qualstats_names(
   OUT parenthash  bigint,
   OUT parentconsthash bigint,
   OUT nodehash    bigint,
+  OUT consthash bigint,
   OUT count bigint,
   OUT filter_ratio float8,
   OUT constant_position int,
@@ -131,14 +133,8 @@ CREATE TYPE qualname AS (
 );
 
 CREATE OR REPLACE VIEW pg_qualstats_by_query AS
-    SELECT dbid, userid, parenthash as parenthash, max(count) as count, max(filter_ratio) as filter_ratio, nodehash,
-         t.queryid, dbname, rolname, relname, array_agg(distinct constvalues) as constvalues,
-      array_agg(distinct (relid, attnum, opno)::qual) as quals,
-      array_agg(distinct (relname, attname, opname)::qualname) AS qual_names
-
-    FROM (
-      SELECT parentconsthash, dbid, userid, coalesce(parenthash, nodehash) as nodehash, parenthash, count, filter_ratio, queryid, dbname, rolname,
-      array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno)::qual) as qual,
+        SELECT coalesce(parentconsthash, consthash) as consthash, dbid, userid,  coalesce(parenthash, nodehash) as nodehash, count, filter_ratio, queryid, dbname, rolname,
+      array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno)::qual) as quals,
       array_agg(distinct ROW(relname, attname, opname)::qualname) AS qual_name
       FROM
       (
@@ -152,6 +148,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.parenthash as parenthash,
             qs.parentconsthash as parentconsthash,
             qs.nodehash as nodehash,
+            qs.consthash as consthash,
             qs.count as count,
             qs.queryid as queryid,
             qs.dbname as dbname,
@@ -173,6 +170,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.parenthash as parenthash,
             qs.parentconsthash as parentconsthash,
             qs.nodehash as nodehash,
+            qs.consthash as consthash,
             count as count,
             qs.queryid as queryid,
             qs.dbname as dbname,
@@ -184,10 +182,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.filter_ratio as filter_ratio
         FROM pg_qualstats_names() qs
         WHERE qs.rrelid IS NOT NULL
-    ) i GROUP BY parentconsthash, parenthash, coalesce(parenthash, nodehash), dbid, userid, count, filter_ratio, queryid, dbname, rolname
-    ) t,
-    LATERAL unnest(t.qual, t.qual_name) as q(relid, attnum, opno, relname, attname, opname)
-    GROUP BY parentconsthash, parenthash, nodehash, dbid, userid, count, filter_ratio, queryid, dbname, rolname, relname;
+    ) i GROUP BY coalesce(parentconsthash, consthash), coalesce(parenthash, nodehash),  dbid, userid, count, filter_ratio, queryid, dbname, rolname;
 
 
 CREATE VIEW pg_qualstats_indexes AS

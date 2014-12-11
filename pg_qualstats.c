@@ -45,7 +45,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 15
+#define PGQS_COLUMNS 16
 #define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
@@ -669,8 +669,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.parenthash = context->parenthash;
 		key.parentconsthash = context->parentconsthash;
 		key.nodehash = hashExpr((Expr*)expr, context, false);
+		key.consthash = hashExpr((Expr*)expr, context, true);
 		key.queryid = context->queryId;
-		key.consthash = 0;
 		if (IsA(node, RelabelType))
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
@@ -777,7 +777,6 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			{
 				get_const_expr(constant, buf);
 				position = constant->location;
-				key.consthash = hash_any((unsigned char*) buf->data, buf->len);
 			}
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
@@ -1025,6 +1024,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			values[i++] = UInt32GetDatum(entry->key.parentconsthash);
 		}
 		values[i++] = UInt32GetDatum(entry->key.nodehash);
+		values[i++] = UInt32GetDatum(entry->key.consthash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
 		if(entry->position == -1)
@@ -1090,7 +1090,6 @@ pgqs_hash_fn(const void *key, Size keysize)
 		hash_uint32((uint32) k->dbid) ^
 		hash_uint32((uint32) k->parenthash) ^
 		hash_uint32((uint32) k->queryid) ^
-		hash_uint32((uint32) k->nodehash) ^
 		hash_uint32((uint32) k->consthash) ^
 		hash_uint32((uint32) k->parentconsthash);
 }
