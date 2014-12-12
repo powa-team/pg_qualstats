@@ -45,7 +45,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 16
+#define PGQS_COLUMNS 17
 #define PGQS_NAME_COLUMNS 7
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
@@ -98,12 +98,10 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
-								 * otherwise. */
-	uint32		nodehash;		/* Hash of the node itself */
 	int64		queryid;		/* query identifier (if set by another plugin */
 	uint32 		consthash; 		/* Hash of the const */
 	uint32		parentconsthash; /* Hash of the parent, including the consts */
+	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual executed after a scan, or 'i' for an indexqual */
 }	pgqsHashKey;
 
 
@@ -130,6 +128,10 @@ typedef struct pgqsEntry
 	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
 												 * the right hand constant, if
 												 * any */
+	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
+								 * otherwise. */
+	uint32		nodehash;		/* Hash of the node itself */
+
 	int64		count;
 	double		filter_ratio;
 	int			position;
@@ -153,6 +155,7 @@ typedef struct pgqsWalkerContext
 	uint32		parentconsthash; /* Hash of the parent, including the consts */
 	int64		count;
 	double		filter_ratio;
+	char		evaltype;
 }	pgqsWalkerContext;
 
 
@@ -314,6 +317,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	context->parenthash = 0;
 	context->parentconsthash = 0;
 	context->filter_ratio = -1;
+	context->evaltype = 0;
 	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	if (prev_ExecutorEnd)
 		prev_ExecutorEnd(queryDesc);
@@ -390,9 +394,16 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	double		oldratio = context->filter_ratio;
 	double 		total_filtered = 0;
 	ListCell *lc;
+	List * parent = 0;
+	List * indexquals = 0;
+	List * quals = 0;
 
 	switch (nodeTag(plan))
 	{
+		case T_IndexScan:
+		case T_IndexOnlyScan:
+			indexquals = ((IndexScan *) plan)->indexqualorig;
+			/* fallthrough general case */
 		case T_CteScan:
 		case T_SeqScan:
 		case T_BitmapHeapScan:
@@ -402,27 +413,9 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		case T_ValuesScan:
 		case T_WorkTableScan:
 		case T_ForeignScan:
-		case T_IndexScan:
-		case T_IndexOnlyScan:
 		case T_BitmapIndexScan:
 		case T_ModifyTable:
-			if (list_length(plan->qual) > 1)
-			{
-				context->parentconsthash = hashExpr((Expr*)plan->qual, context, true);
-				context->parenthash = hashExpr((Expr*)plan->qual, context, false);
-			}
-			total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
-			context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
-			if (total_filtered == 0){
-				context->filter_ratio = 0;
-			} else {
-				context->filter_ratio = total_filtered / context->count;
-			}
-			expression_tree_walker((Node *) plan->qual, pgqs_whereclause_tree_walker, context);
-			context->parenthash = 0;
-			context->parentconsthash = 0;
-			context->count = oldcount;
-			context->filter_ratio = oldratio;
+			quals = plan->qual;
 			break;
 		case T_NestLoop:
 		case T_MergeJoin:
@@ -433,6 +426,34 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			break;
 
 	}
+	parent = list_union(indexquals, quals);
+	if (list_length(parent) > 1)
+	{
+		context->parentconsthash = hashExpr((Expr*)parent, context, true);
+		context->parenthash = hashExpr((Expr*)parent, context, false);
+	}
+	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
+	if (total_filtered == 0){
+		context->filter_ratio = 0;
+	} else {
+		context->filter_ratio = total_filtered / context->count;
+	}
+	/* Add the indexquals */
+	context->evaltype = 'i';
+	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
+	expression_tree_walker((Node *) indexquals, pgqs_whereclause_tree_walker, context);
+
+	/* Add the generic quals */
+	context->evaltype = 'f';
+	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
+	expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker, context);
+	context->parenthash = 0;
+	context->parentconsthash = 0;
+	context->count = oldcount;
+	context->filter_ratio = oldratio;
+
+
+
 	foreach(lc, planstate->initPlan)
 	{
 		SubPlanState *sps = (SubPlanState*) lfirst(lc);
@@ -666,11 +687,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
-		key.parenthash = context->parenthash;
 		key.parentconsthash = context->parentconsthash;
-		key.nodehash = hashExpr((Expr*)expr, context, false);
 		key.consthash = hashExpr((Expr*)expr, context, true);
 		key.queryid = context->queryId;
+		key.evaltype = context->evaltype;
 		if (IsA(node, RelabelType))
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
@@ -786,6 +806,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->filter_ratio = -1;
 				entry->usage = 0;
 				entry->position = position;
+				entry->nodehash = hashExpr((Expr*)expr, context, false);
+				entry->parenthash = context->parenthash;
 				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				if (pgqs_resolve_oids)
 				{
@@ -1007,13 +1029,13 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}
-		if (entry->key.parenthash == 0)
+		if (entry->parenthash == 0)
 		{
 			nulls[i++] = true;
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->key.parenthash);
+			values[i++] = UInt32GetDatum(entry->parenthash);
 		}
 		if (entry->key.parentconsthash == 0)
 		{
@@ -1023,7 +1045,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		{
 			values[i++] = UInt32GetDatum(entry->key.parentconsthash);
 		}
-		values[i++] = UInt32GetDatum(entry->key.nodehash);
+		values[i++] = UInt32GetDatum(entry->nodehash);
 		values[i++] = UInt32GetDatum(entry->key.consthash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
@@ -1047,6 +1069,13 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		{
 
 			values[i++] = CStringGetTextDatum(strdup(entry->constvalue));
+		}
+		else
+		{
+			nulls[i++] = true;
+		}
+		if(entry->key.evaltype){
+			values[i++] = CharGetDatum(entry->key.evaltype);
 		}
 		else
 		{
@@ -1088,10 +1117,10 @@ pgqs_hash_fn(const void *key, Size keysize)
 	const pgqsHashKey *k = (const pgqsHashKey *) key;
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
-		hash_uint32((uint32) k->parenthash) ^
 		hash_uint32((uint32) k->queryid) ^
 		hash_uint32((uint32) k->consthash) ^
-		hash_uint32((uint32) k->parentconsthash);
+		hash_uint32((uint32) k->parentconsthash) ^
+		hash_uint32((uint32) k->evaltype);
 }
 
 /*
