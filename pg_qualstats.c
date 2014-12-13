@@ -433,6 +433,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		context->parenthash = hashExpr((Expr*)parent, context, false);
 	}
 	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
+	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
 	if (total_filtered == 0){
 		context->filter_ratio = 0;
 	} else {
@@ -440,12 +441,10 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	}
 	/* Add the indexquals */
 	context->evaltype = 'i';
-	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
 	expression_tree_walker((Node *) indexquals, pgqs_whereclause_tree_walker, context);
 
 	/* Add the generic quals */
 	context->evaltype = 'f';
-	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
 	expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker, context);
 	context->parenthash = 0;
 	context->parentconsthash = 0;
