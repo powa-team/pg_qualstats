@@ -98,7 +98,7 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	int64		queryid;		/* query identifier (if set by another plugin */
+	uint32		queryid;		/* query identifier (if set by another plugin */
 	uint32 		consthash; 		/* Hash of the const */
 	uint32		parentconsthash; /* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual executed after a scan, or 'i' for an indexqual */
@@ -1062,7 +1062,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = Int64GetDatum(entry->key.queryid);
+			values[i++] = UInt32GetDatum(entry->key.queryid);
 		}
 		if (entry->constvalue)
 		{
