@@ -162,6 +162,7 @@ typedef struct pgqsWalkerContext
 static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
 static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
+static pgqsEntry *pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context);
 static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
@@ -570,6 +571,97 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 	return entry;
 }
 
+static pgqsEntry *
+pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
+{
+	pgqsHashKey key;
+	pgqsEntry * entry;
+	bool found;
+	Var * var;
+	char * constant;
+	Oid opoid;
+	RangeTblEntry *rte;
+	if(!IsA(expr->arg, Var)){
+		return NULL;
+	}
+	var = (Var *) expr->arg;
+	rte = list_nth(context->rtable, var->varno - 1);
+	switch(expr->booltesttype){
+		case IS_TRUE:
+			constant = "TRUE::bool";
+			opoid = BooleanEqualOperator;
+			break;
+		case IS_FALSE:
+			constant = "FALSE::bool";
+			opoid = BooleanEqualOperator;
+			break;
+		case IS_NOT_TRUE:
+			constant = "TRUE::bool";
+			opoid = BooleanNotEqualOperator;
+			break;
+		case IS_NOT_FALSE:
+			constant = "FALSE::bool";
+			opoid = BooleanNotEqualOperator;
+			break;
+		case IS_UNKNOWN:
+			constant = "NULL::bool";
+			opoid = BooleanEqualOperator;
+			break;
+		case IS_NOT_UNKNOWN:
+			constant = "NULL::bool";
+			opoid = BooleanNotEqualOperator;
+			break;
+	}
+	key.userid = GetUserId();
+	key.dbid = MyDatabaseId;
+	key.parentconsthash = context->parentconsthash;
+	key.consthash = hashExpr((Expr*)expr, context, true);
+	key.queryid = context->queryId;
+	key.evaltype = context->evaltype;
+	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+	entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
+	if (!found)
+	{
+		entry->count = 0;
+		entry->filter_ratio = -1;
+		entry->usage = 0;
+		entry->position = 0;
+		entry->nodehash = hashExpr((Expr*)expr, context, false);
+		entry->parenthash = context->parenthash;
+		entry->opoid = opoid;
+		entry->lrelid = InvalidOid;
+		entry->lattnum = InvalidAttrNumber;
+		entry->rrelid = InvalidOid;
+		entry->rattnum = InvalidAttrNumber;
+
+		if (rte->rtekind == RTE_RELATION)
+		{
+			entry->lrelid = rte->relid;
+			entry->lattnum = var->varattno;
+		}
+		strncpy(entry->constvalue, constant, strlen(constant));
+		if (pgqs_resolve_oids)
+		{
+			pgqs_fillnames((pgqsEntryWithNames *) entry);
+		}
+		while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
+			pgqs_entry_dealloc();
+
+	}
+	if (entry->filter_ratio > -1)
+	{
+		entry->filter_ratio = ((entry->filter_ratio * entry->count) + (context->filter_ratio * context->count)) / (entry->count + context->count);
+	}
+	else
+	{
+		entry->filter_ratio = context->filter_ratio;
+	}
+	entry->count += context->count;
+	entry->usage += context->count;
+	LWLockRelease(pgqs->lock);
+	return entry;
+}
+
 static void
 get_const_expr(Const *constval, StringInfo buf)
 {
@@ -877,6 +969,9 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 		case T_ScalarArrayOpExpr:
 			pgqs_process_scalararrayopexpr((ScalarArrayOpExpr *) node, context);
 			return false;
+		case T_BooleanTest:
+			pgqs_process_booltest((BooleanTest *) node, context);
+			return false;
 		default:
 			expression_tree_walker(node, pgqs_whereclause_tree_walker, context);
 			return false;
@@ -1002,7 +1097,6 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		int			i = 0;
-
 		memset(values, 0, sizeof(Datum) * nb_columns);
 		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
@@ -1150,6 +1244,7 @@ static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context,
 {
 
 	ListCell *lc;
+	appendStringInfo(buffer, "%d-", expr->type);
 	switch(expr->type)
 	{
 		case T_List:
@@ -1179,6 +1274,12 @@ static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context,
 		case T_BoolExpr:
 			appendStringInfo(buffer, "%d", ((BoolExpr*)expr)->boolop);
 			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context, include_const);
+			break;
+		case T_BooleanTest:
+			if(include_const){
+				appendStringInfo(buffer, "%d", ((BooleanTest *) expr)->booltesttype);
+			}
+			exprRepr((Expr*)((BooleanTest*)expr)->arg, buffer, context, include_const);
 			break;
 		case T_Const:
 			if(include_const){
