@@ -88,7 +88,7 @@ static bool pgqs_resolve_oids;	/* resolve oids */
 typedef struct pgqsSharedState
 {
 #if PG_VERSION_NUM >= 90400
-	LWLock		*lock;			/* protects hashtable search/modification */
+	LWLock	   *lock;			/* protects hashtable search/modification */
 #else
 	LWLockId	lock;
 #endif
@@ -98,10 +98,12 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	uint32		queryid;		/* query identifier (if set by another plugin */
-	uint32 		consthash; 		/* Hash of the const */
-	uint32		parentconsthash; /* Hash of the parent, including the consts */
-	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual executed after a scan, or 'i' for an indexqual */
+	int64		queryid;		/* query identifier (if set by another plugin */
+	uint32		consthash;		/* Hash of the const */
+	uint32		parentconsthash;	/* Hash of the parent, including the consts */
+	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
+								 * executed after a scan, or 'i' for an
+								 * indexqual */
 }	pgqsHashKey;
 
 
@@ -150,9 +152,9 @@ typedef struct pgqsEntryWithNames
 typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
-	List		*rtable;
+	List	   *rtable;
 	uint32		parenthash;
-	uint32		parentconsthash; /* Hash of the parent, including the consts */
+	uint32		parentconsthash;	/* Hash of the parent, including the consts */
 	int64		count;
 	double		filter_ratio;
 	char		evaltype;
@@ -166,8 +168,8 @@ static pgqsEntry *pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * c
 static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext * context);
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
-static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context, bool include_const);
-static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include_const);
+static uint32 hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const);
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const);
 
 
 static void pgqs_entry_dealloc(void);
@@ -390,14 +392,14 @@ pgqs_entry_dealloc(void)
 static void
 pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context)
 {
-	Plan		*plan = planstate->plan;
+	Plan	   *plan = planstate->plan;
 	int64		oldcount = context->count;
 	double		oldratio = context->filter_ratio;
-	double 		total_filtered = 0;
-	ListCell *lc;
-	List * parent = 0;
-	List * indexquals = 0;
-	List * quals = 0;
+	double		total_filtered = 0;
+	ListCell   *lc;
+	List	   *parent = 0;
+	List	   *indexquals = 0;
+	List	   *quals = 0;
 
 	switch (nodeTag(plan))
 	{
@@ -430,14 +432,17 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	parent = list_union(indexquals, quals);
 	if (list_length(parent) > 1)
 	{
-		context->parentconsthash = hashExpr((Expr*)parent, context, true);
-		context->parenthash = hashExpr((Expr*)parent, context, false);
+		context->parentconsthash = hashExpr((Expr *) parent, context, true);
+		context->parenthash = hashExpr((Expr *) parent, context, false);
 	}
 	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
 	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
-	if (total_filtered == 0){
+	if (total_filtered == 0)
+	{
 		context->filter_ratio = 0;
-	} else {
+	}
+	else
+	{
 		context->filter_ratio = total_filtered / context->count;
 	}
 	/* Add the indexquals */
@@ -456,7 +461,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 
 	foreach(lc, planstate->initPlan)
 	{
-		SubPlanState *sps = (SubPlanState*) lfirst(lc);
+		SubPlanState *sps = (SubPlanState *) lfirst(lc);
+
 		pgqs_collectNodeStats(sps->planstate, ancestors, context);
 	}
 
@@ -521,7 +527,7 @@ pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
 static void
 pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context)
 {
-	ListCell	*lst;
+	ListCell   *lst;
 
 	foreach(lst, plans)
 	{
@@ -534,10 +540,10 @@ pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * conte
 static pgqsEntry *
 pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context)
 {
-	OpExpr		*op = makeNode(OpExpr);
+	OpExpr	   *op = makeNode(OpExpr);
 	int			len = 0;
 	pgqsEntry  *entry;
-	Expr		*array = lsecond(expr->args);
+	Expr	   *array = lsecond(expr->args);
 
 	op->opno = expr->opno;
 	op->opfuncid = expr->opfuncid;
@@ -572,21 +578,24 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 }
 
 static pgqsEntry *
-pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
+pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 {
 	pgqsHashKey key;
-	pgqsEntry * entry;
-	bool found;
-	Var * var;
-	char * constant;
-	Oid opoid;
+	pgqsEntry  *entry;
+	bool		found;
+	Var		   *var;
+	char	   *constant;
+	Oid			opoid;
 	RangeTblEntry *rte;
-	if(!IsA(expr->arg, Var)){
+
+	if (!IsA(expr->arg, Var))
+	{
 		return NULL;
 	}
 	var = (Var *) expr->arg;
 	rte = list_nth(context->rtable, var->varno - 1);
-	switch(expr->booltesttype){
+	switch (expr->booltesttype)
+	{
 		case IS_TRUE:
 			constant = "TRUE::bool";
 			opoid = BooleanEqualOperator;
@@ -615,7 +624,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
 	key.parentconsthash = context->parentconsthash;
-	key.consthash = hashExpr((Expr*)expr, context, true);
+	key.consthash = hashExpr((Expr *) expr, context, true);
 	key.queryid = context->queryId;
 	key.evaltype = context->evaltype;
 	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
@@ -626,7 +635,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 		entry->filter_ratio = -1;
 		entry->usage = 0;
 		entry->position = 0;
-		entry->nodehash = hashExpr((Expr*)expr, context, false);
+		entry->nodehash = hashExpr((Expr *) expr, context, false);
 		entry->parenthash = context->parenthash;
 		entry->opoid = opoid;
 		entry->lrelid = InvalidOid;
@@ -667,7 +676,7 @@ get_const_expr(Const *constval, StringInfo buf)
 {
 	Oid			typoutput;
 	bool		typIsVarlena;
-	char		*extval;
+	char	   *extval;
 
 	if (constval->constisnull)
 	{
@@ -759,17 +768,18 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 {
 	if (list_length(expr->args) == 2)
 	{
-		Node		*node = linitial(expr->args);
-		Var			*var = NULL;
-		Const		*constant = NULL;
+		Node	   *node = linitial(expr->args);
+		Var		   *var = NULL;
+		Const	   *constant = NULL;
 		bool		found;
-		Oid			*sreliddest = NULL;
+		Oid		   *sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
-		int 		position = -1;
+		int			position = -1;
 		StringInfo	buf = makeStringInfo();
 		pgqsHashKey key;
 
-		pgqsEntry  tempentry;
+		pgqsEntry	tempentry;
+
 		tempentry.opoid = expr->opno;
 		tempentry.lattnum = InvalidAttrNumber;
 		tempentry.lrelid = InvalidOid;
@@ -779,7 +789,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
 		key.parentconsthash = context->parentconsthash;
-		key.consthash = hashExpr((Expr*)expr, context, true);
+		key.consthash = hashExpr((Expr *) expr, context, true);
 		key.queryid = context->queryId;
 		key.evaltype = context->evaltype;
 		if (IsA(node, RelabelType))
@@ -812,7 +822,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			if (OidIsValid(get_commutator(expr->opno)))
 			{
-				OpExpr		*temp = copyObject(expr);
+				OpExpr	   *temp = copyObject(expr);
 
 				CommuteOpExpr(temp);
 				node = linitial(temp->args);
@@ -848,7 +858,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		if (var != NULL)
 		{
 
-			pgqsEntry * entry;
+			pgqsEntry  *entry;
+
 			if (!pgqs_track_pgcatalog)
 			{
 				HeapTuple	tp;
@@ -897,7 +908,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->filter_ratio = -1;
 				entry->usage = 0;
 				entry->position = position;
-				entry->nodehash = hashExpr((Expr*)expr, context, false);
+				entry->nodehash = hashExpr((Expr *) expr, context, false);
 				entry->parenthash = context->parenthash;
 				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				if (pgqs_resolve_oids)
@@ -935,7 +946,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 	{
 		case T_BoolExpr:
 			{
-				BoolExpr	*boolexpr = (BoolExpr *) node;
+				BoolExpr   *boolexpr = (BoolExpr *) node;
 
 				if (boolexpr->boolop == NOT_EXPR)
 				{
@@ -957,8 +968,8 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 				}
 				if ((boolexpr->boolop == AND_EXPR))
 				{
-					context->parentconsthash = hashExpr((Expr*)boolexpr, context, true);
-					context->parenthash = hashExpr((Expr*)boolexpr, context, false);
+					context->parentconsthash = hashExpr((Expr *) boolexpr, context, true);
+					context->parenthash = hashExpr((Expr *) boolexpr, context, false);
 				}
 				expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
 				return false;
@@ -983,6 +994,7 @@ pgqs_shmem_startup(void)
 {
 	HASHCTL		info;
 	bool		found;
+
 	if (prev_shmem_startup_hook)
 		prev_shmem_startup_hook();
 	pgqs = NULL;
@@ -999,8 +1011,8 @@ pgqs_shmem_startup(void)
 	}
 	info.hash = pgqs_hash_fn;
 	pgqs = ShmemInitStruct("pg_qualstats",
-							sizeof(pgqsSharedState),
-							&found);
+						   sizeof(pgqsSharedState),
+						   &found);
 	if (!found)
 	{
 		/* First time through ... */
@@ -1058,8 +1070,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry  *entry;
-	Datum		*values;
-	bool		*nulls;
+	Datum	   *values;
+	bool	   *nulls;
 
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
@@ -1097,6 +1109,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		int			i = 0;
+
 		memset(values, 0, sizeof(Datum) * nb_columns);
 		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
@@ -1142,7 +1155,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = UInt32GetDatum(entry->key.consthash);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
-		if(entry->position == -1)
+		if (entry->position == -1)
 		{
 			nulls[i++] = true;
 		}
@@ -1167,7 +1180,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		{
 			nulls[i++] = true;
 		}
-		if(entry->key.evaltype){
+		if (entry->key.evaltype)
+		{
 			values[i++] = CharGetDatum(entry->key.evaltype);
 		}
 		else
@@ -1176,9 +1190,10 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		if (include_names)
 		{
-			if(pgqs_resolve_oids)
+			if (pgqs_resolve_oids)
 			{
 				pgqsNames	names = ((pgqsEntryWithNames *) entry)->names;
+
 				values[i++] = CStringGetTextDatum(NameStr(names.rolname));
 				values[i++] = CStringGetTextDatum(NameStr(names.datname));
 				values[i++] = CStringGetTextDatum(NameStr(names.lrelname));
@@ -1186,8 +1201,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 				values[i++] = CStringGetTextDatum(NameStr(names.opname));
 				values[i++] = CStringGetTextDatum(NameStr(names.rrelname));
 				values[i++] = CStringGetTextDatum(NameStr(names.rattname));
-			} else {
-				for(; i < nb_columns; i++){
+			}
+			else
+			{
+				for (; i < nb_columns; i++)
+				{
 					nulls[i] = true;
 				}
 			}
@@ -1208,6 +1226,7 @@ static uint32
 pgqs_hash_fn(const void *key, Size keysize)
 {
 	const pgqsHashKey *k = (const pgqsHashKey *) key;
+
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
 		hash_uint32((uint32) k->queryid) ^
@@ -1225,66 +1244,78 @@ pgqs_memsize(void)
 	Size		size;
 
 	size = MAXALIGN(sizeof(pgqsSharedState));
-	if(pgqs_resolve_oids){
+	if (pgqs_resolve_oids)
+	{
 		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntryWithNames)));
-	} else {
+	}
+	else
+	{
 		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntry)));
 	}
 	return size;
 }
 
-static uint32 hashExpr(Expr* expr, pgqsWalkerContext * context, bool include_const){
-	StringInfo buffer = makeStringInfo();
+static uint32
+hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const)
+{
+	StringInfo	buffer = makeStringInfo();
+
 	exprRepr(expr, buffer, context, include_const);
 	return hash_any((unsigned char *) buffer->data, buffer->len);
 
 }
 
-static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const)
+static void
+exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const)
 {
+	ListCell   *lc;
 
-	ListCell *lc;
 	appendStringInfo(buffer, "%d-", expr->type);
-	switch(expr->type)
+	switch (expr->type)
 	{
 		case T_List:
-			foreach(lc, (List*) expr)
+			foreach(lc, (List *) expr)
 			{
-				exprRepr((Expr*) lfirst(lc), buffer, context, include_const);
+				exprRepr((Expr *) lfirst(lc), buffer, context, include_const);
 			}
 			break;
 		case T_OpExpr:
 			appendStringInfo(buffer, "%d", ((OpExpr *) expr)->opno);
-			exprRepr((Expr*)((OpExpr*)expr)->args, buffer, context, include_const);
+			exprRepr((Expr *) ((OpExpr *) expr)->args, buffer, context, include_const);
 			break;
 		case T_Var:
 			{
-			Var * var = (Var*) expr;
-			RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
-			if (rte->rtekind == RTE_RELATION)
-			{
-				appendStringInfo(buffer, "%d;%d", rte->relid, var->varattno);
-			}
-			else
-			{
-				appendStringInfo(buffer, "NORTE%d;%d", var->varno, var->varattno);
-			}
+				Var		   *var = (Var *) expr;
+				RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
+
+				if (rte->rtekind == RTE_RELATION)
+				{
+					appendStringInfo(buffer, "%d;%d", rte->relid, var->varattno);
+				}
+				else
+				{
+					appendStringInfo(buffer, "NORTE%d;%d", var->varno, var->varattno);
+				}
 			}
 			break;
 		case T_BoolExpr:
-			appendStringInfo(buffer, "%d", ((BoolExpr*)expr)->boolop);
-			exprRepr((Expr*)((BoolExpr*)expr)->args, buffer, context, include_const);
+			appendStringInfo(buffer, "%d", ((BoolExpr *) expr)->boolop);
+			exprRepr((Expr *) ((BoolExpr *) expr)->args, buffer, context, include_const);
 			break;
 		case T_BooleanTest:
-			if(include_const){
+			if (include_const)
+			{
 				appendStringInfo(buffer, "%d", ((BooleanTest *) expr)->booltesttype);
 			}
-			exprRepr((Expr*)((BooleanTest*)expr)->arg, buffer, context, include_const);
+			exprRepr((Expr *) ((BooleanTest *) expr)->arg, buffer, context, include_const);
 			break;
 		case T_Const:
-			if(include_const){
-				get_const_expr((Const*)expr, buffer);
-			} else {
+			if (include_const)
+			{
+				get_const_expr((Const *) expr, buffer);
+			}
+			else
+			{
 				appendStringInfoChar(buffer, '?');
 			}
 			break;
