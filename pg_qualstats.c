@@ -98,7 +98,7 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	int64		queryid;		/* query identifier (if set by another plugin */
+	uint32		queryid;		/* query identifier (if set by another plugin */
 	uint32		consthash;		/* Hash of the const */
 	uint32		parentconsthash;	/* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
