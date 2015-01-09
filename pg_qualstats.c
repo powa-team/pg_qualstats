@@ -620,6 +620,9 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 			constant = "NULL::bool";
 			opoid = BooleanNotEqualOperator;
 			break;
+		default:
+			/* Bail out */
+			return NULL;
 	}
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
