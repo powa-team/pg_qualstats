@@ -11,10 +11,10 @@ CREATE FUNCTION pg_qualstats(
   OUT opno oid,
   OUT rrelid oid,
   OUT rattnum smallint,
-  OUT parenthash  bigint,
-  OUT parentconsthash bigint,
-  OUT nodehash    bigint,
-  OUT consthash bigint,
+  OUT qualid  bigint,
+  OUT uniquequalid bigint,
+  OUT qualnodeid    bigint,
+  OUT uniquequalnodeid bigint,
   OUT count bigint,
   OUT filter_ratio float8,
   OUT constant_position int,
@@ -34,10 +34,10 @@ CREATE FUNCTION pg_qualstats_names(
   OUT opno oid,
   OUT rrelid oid,
   OUT rattnum smallint,
-  OUT parenthash  bigint,
-  OUT parentconsthash bigint,
-  OUT nodehash    bigint,
-  OUT consthash bigint,
+  OUT qualid  bigint,
+  OUT uniquequalid bigint,
+  OUT qualnodeid    bigint,
+  OUT uniquequalnodeid bigint,
   OUT count bigint,
   OUT filter_ratio float8,
   OUT constant_position int,
@@ -91,8 +91,8 @@ CREATE VIEW pg_qualstats_pretty AS
 
 
 CREATE OR REPLACE VIEW pg_qualstats_all AS
-  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(parenthash) as parenthash, sum(count) as count,
-    coalesce(parenthash, nodehash) as nodehash
+  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(qualid) as qualid, sum(count) as count,
+    coalesce(qualid, qualnodeid) as qualnodeid
   FROM (
     SELECT
           qs.dbid,
@@ -100,8 +100,8 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.userid as userid,
           qs.lattnum as attnum,
           qs.opno as opno,
-          qs.parenthash as parenthash,
-          qs.nodehash as nodehash,
+          qs.qualid as qualid,
+          qs.qualnodeid as qualnodeid,
           qs.count as count,
           qs.queryid
     FROM pg_qualstats() qs
@@ -113,13 +113,13 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.userid as userid,
           qs.rattnum as attnum,
           qs.opno as opno,
-          qs.parenthash as parenthash,
-          qs.nodehash as nodehash,
+          qs.qualid as qualid,
+          qs.qualnodeid as qualnodeid,
           count as count,
           qs.queryid
     FROM pg_qualstats() qs
     WHERE qs.rrelid IS NOT NULL
-  ) t GROUP BY dbid, relid, userid, queryid, opno, coalesce(parenthash, nodehash)
+  ) t GROUP BY dbid, relid, userid, queryid, opno, coalesce(qualid, qualnodeid)
 ;
 
 CREATE TYPE qual AS (
@@ -137,7 +137,7 @@ CREATE TYPE qualname AS (
 );
 
 CREATE OR REPLACE VIEW pg_qualstats_by_query AS
-        SELECT coalesce(parentconsthash, consthash) as consthash, dbid, userid,  coalesce(parenthash, nodehash) as nodehash, count, filter_ratio, queryid, dbname, rolname,
+        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, filter_ratio, queryid, dbname, rolname,
       array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno, eval_type)::qual) as quals,
       array_agg(distinct ROW(relname, attname, opname, eval_type)::qualname) AS qual_name
       FROM
@@ -149,10 +149,10 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.userid as userid,
             qs.lattnum as attnum,
             qs.opno as opno,
-            qs.parenthash as parenthash,
-            qs.parentconsthash as parentconsthash,
-            qs.nodehash as nodehash,
-            qs.consthash as consthash,
+            qs.qualid as qualid,
+            qs.uniquequalid as uniquequalid,
+            qs.qualnodeid as qualnodeid,
+            qs.uniquequalnodeid as uniquequalnodeid,
             qs.count as count,
             qs.queryid as queryid,
             qs.dbname as dbname,
@@ -162,7 +162,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.opname as opname,
             qs.constvalue as constvalue,
             qs.filter_ratio as filter_ratio,
-			qs.eval_type
+            qs.eval_type
         FROM pg_qualstats_names() qs
         WHERE qs.lrelid IS NOT NULL
         UNION
@@ -172,10 +172,10 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.userid as userid,
             qs.rattnum as attnum,
             qs.opno as opno,
-            qs.parenthash as parenthash,
-            qs.parentconsthash as parentconsthash,
-            qs.nodehash as nodehash,
-            qs.consthash as consthash,
+            qs.qualid as qualid,
+            qs.uniquequalid as uniquequalid,
+            qs.qualnodeid as qualnodeid,
+            qs.uniquequalnodeid as uniquequalnodeid,
             count as count,
             qs.queryid as queryid,
             qs.dbname as dbname,
@@ -185,10 +185,10 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.opname as opname,
             qs.constvalue as constvalue,
             qs.filter_ratio as filter_ratio,
-			qs.eval_type
+            qs.eval_type
         FROM pg_qualstats_names() qs
         WHERE qs.rrelid IS NOT NULL
-    ) i GROUP BY coalesce(parentconsthash, consthash), coalesce(parenthash, nodehash),  dbid, userid, count, filter_ratio, queryid, dbname, rolname;
+    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, filter_ratio, queryid, dbname, rolname;
 
 
 CREATE VIEW pg_qualstats_indexes AS
@@ -207,7 +207,7 @@ FROM (
         ((attnums::int2[]) @> (i.indkey::int2[])[0:array_length(indkey, 1) + 1]  AND
             i.indisunique))
   )
-  GROUP BY qs.relid, nodehash
+  GROUP BY qs.relid, qualnodeid
 ) t GROUP BY relid, attnames, possible_types;
 
 
@@ -276,5 +276,5 @@ CREATE OR REPLACE VIEW pg_qualstats_indexes_ddl AS
           WHERE NOT (EXISTS ( SELECT 1
                                FROM pg_index i
                               WHERE i.indrelid = qs.relid AND ((i.indkey::smallint[])[0:array_length(qs.attnums, 1) - 1] @> qs.attnums OR qs.attnums @> (i.indkey::smallint[])[0:array_length(i.indkey, 1) + 1] AND i.indisunique)))
-          GROUP BY nl.nspname, qs.relid, qs.nodehash) t
+          GROUP BY nl.nspname, qs.relid, qs.qualnodeid) t
   GROUP BY t.nspname, t.relid, t.attnames, t.possible_types) q;

@@ -99,8 +99,8 @@ typedef struct pgqsHashKey
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
 	uint32		queryid;		/* query identifier (if set by another plugin */
-	uint32		consthash;		/* Hash of the const */
-	uint32		parentconsthash;	/* Hash of the parent, including the consts */
+	uint32		uniquequalnodeid;		/* Hash of the const */
+	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
 								 * executed after a scan, or 'i' for an
 								 * indexqual */
@@ -130,9 +130,9 @@ typedef struct pgqsEntry
 	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
 												 * the right hand constant, if
 												 * any */
-	uint32		parenthash;		/* Hash of the parent AND expression if any, 0
+	uint32		qualid;		/* Hash of the parent AND expression if any, 0
 								 * otherwise. */
-	uint32		nodehash;		/* Hash of the node itself */
+	uint32		qualnodeid;		/* Hash of the node itself */
 
 	int64		count;
 	double		filter_ratio;
@@ -153,8 +153,8 @@ typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
 	List	   *rtable;
-	uint32		parenthash;
-	uint32		parentconsthash;	/* Hash of the parent, including the consts */
+	uint32		qualid;
+	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
 	double		filter_ratio;
 	char		evaltype;
@@ -317,8 +317,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	context->queryId = queryDesc->plannedstmt->queryId;
 	context->rtable = queryDesc->plannedstmt->rtable;
 	context->count = 0;
-	context->parenthash = 0;
-	context->parentconsthash = 0;
+	context->qualid = 0;
+	context->uniquequalid = 0;
 	context->filter_ratio = -1;
 	context->evaltype = 0;
 	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
@@ -432,8 +432,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	parent = list_union(indexquals, quals);
 	if (list_length(parent) > 1)
 	{
-		context->parentconsthash = hashExpr((Expr *) parent, context, true);
-		context->parenthash = hashExpr((Expr *) parent, context, false);
+		context->uniquequalid = hashExpr((Expr *) parent, context, true);
+		context->qualid = hashExpr((Expr *) parent, context, false);
 	}
 	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
 	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
@@ -452,8 +452,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	/* Add the generic quals */
 	context->evaltype = 'f';
 	expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker, context);
-	context->parenthash = 0;
-	context->parentconsthash = 0;
+	context->qualid = 0;
+	context->uniquequalid = 0;
 	context->count = oldcount;
 	context->filter_ratio = oldratio;
 
@@ -626,8 +626,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	}
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
-	key.parentconsthash = context->parentconsthash;
-	key.consthash = hashExpr((Expr *) expr, context, true);
+	key.uniquequalid = context->uniquequalid;
+	key.uniquequalnodeid = hashExpr((Expr *) expr, context, true);
 	key.queryid = context->queryId;
 	key.evaltype = context->evaltype;
 	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
@@ -638,8 +638,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		entry->filter_ratio = -1;
 		entry->usage = 0;
 		entry->position = 0;
-		entry->nodehash = hashExpr((Expr *) expr, context, false);
-		entry->parenthash = context->parenthash;
+		entry->qualnodeid = hashExpr((Expr *) expr, context, false);
+		entry->qualid = context->qualid;
 		entry->opoid = opoid;
 		entry->lrelid = InvalidOid;
 		entry->lattnum = InvalidAttrNumber;
@@ -791,8 +791,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
-		key.parentconsthash = context->parentconsthash;
-		key.consthash = hashExpr((Expr *) expr, context, true);
+		key.uniquequalid = context->uniquequalid;
+		key.uniquequalnodeid = hashExpr((Expr *) expr, context, true);
 		key.queryid = context->queryId;
 		key.evaltype = context->evaltype;
 		if (IsA(node, RelabelType))
@@ -911,8 +911,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->filter_ratio = -1;
 				entry->usage = 0;
 				entry->position = position;
-				entry->nodehash = hashExpr((Expr *) expr, context, false);
-				entry->parenthash = context->parenthash;
+				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
+				entry->qualid = context->qualid;
 				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 				if (pgqs_resolve_oids)
 				{
@@ -954,25 +954,25 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 				if (boolexpr->boolop == NOT_EXPR)
 				{
 					/* Skip, and do not keep track of the qual */
-					uint32		previous_hash = context->parenthash;
-					uint32		previous_consthash = context->parentconsthash;
+					uint32		previous_hash = context->qualid;
+					uint32		previous_uniquequalnodeid = context->uniquequalid;
 
-					context->parenthash = 0;
-					context->parentconsthash = 0;
+					context->qualid = 0;
+					context->uniquequalid = 0;
 					expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
-					context->parenthash = previous_hash;
-					context->parentconsthash = previous_consthash;
+					context->qualid = previous_hash;
+					context->uniquequalid = previous_uniquequalnodeid;
 					return false;
 				}
 				if (boolexpr->boolop == OR_EXPR)
 				{
-					context->parenthash = 0;
-					context->parentconsthash = 0;
+					context->qualid = 0;
+					context->uniquequalid = 0;
 				}
 				if ((boolexpr->boolop == AND_EXPR))
 				{
-					context->parentconsthash = hashExpr((Expr *) boolexpr, context, true);
-					context->parenthash = hashExpr((Expr *) boolexpr, context, false);
+					context->uniquequalid = hashExpr((Expr *) boolexpr, context, true);
+					context->qualid = hashExpr((Expr *) boolexpr, context, false);
 				}
 				expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
 				return false;
@@ -1138,24 +1138,24 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}
-		if (entry->parenthash == 0)
+		if (entry->qualid == 0)
 		{
 			nulls[i++] = true;
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->parenthash);
+			values[i++] = UInt32GetDatum(entry->qualid);
 		}
-		if (entry->key.parentconsthash == 0)
+		if (entry->key.uniquequalid == 0)
 		{
 			nulls[i++] = true;
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->key.parentconsthash);
+			values[i++] = UInt32GetDatum(entry->key.uniquequalid);
 		}
-		values[i++] = UInt32GetDatum(entry->nodehash);
-		values[i++] = UInt32GetDatum(entry->key.consthash);
+		values[i++] = UInt32GetDatum(entry->qualnodeid);
+		values[i++] = UInt32GetDatum(entry->key.uniquequalnodeid);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Float8GetDatumFast(entry->filter_ratio);
 		if (entry->position == -1)
@@ -1233,8 +1233,8 @@ pgqs_hash_fn(const void *key, Size keysize)
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
 		hash_uint32((uint32) k->queryid) ^
-		hash_uint32((uint32) k->consthash) ^
-		hash_uint32((uint32) k->parentconsthash) ^
+		hash_uint32((uint32) k->uniquequalnodeid) ^
+		hash_uint32((uint32) k->uniquequalid) ^
 		hash_uint32((uint32) k->evaltype);
 }
 
