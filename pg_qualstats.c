@@ -135,7 +135,7 @@ typedef struct pgqsEntry
 	uint32		qualnodeid;		/* Hash of the node itself */
 
 	int64		count;
-	double		filter_ratio;
+	int64 		nbfiltered;
 	int			position;
 	double		usage;
 }	pgqsEntry;
@@ -156,7 +156,7 @@ typedef struct pgqsWalkerContext
 	uint32		qualid;
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
-	double		filter_ratio;
+	int64 		nbfiltered;
 	char		evaltype;
 }	pgqsWalkerContext;
 
@@ -319,7 +319,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	context->count = 0;
 	context->qualid = 0;
 	context->uniquequalid = 0;
-	context->filter_ratio = -1;
+	context->nbfiltered = 0;
 	context->evaltype = 0;
 	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	if (prev_ExecutorEnd)
@@ -394,7 +394,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 {
 	Plan	   *plan = planstate->plan;
 	int64		oldcount = context->count;
-	double		oldratio = context->filter_ratio;
+	double		oldfiltered = context->nbfiltered;
 	double		total_filtered = 0;
 	ListCell   *lc;
 	List	   *parent = 0;
@@ -436,15 +436,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		context->qualid = hashExpr((Expr *) parent, context, false);
 	}
 	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
+	context->nbfiltered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
 	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
-	if (total_filtered == 0)
-	{
-		context->filter_ratio = 0;
-	}
-	else
-	{
-		context->filter_ratio = total_filtered / context->count;
-	}
 	/* Add the indexquals */
 	context->evaltype = 'i';
 	expression_tree_walker((Node *) indexquals, pgqs_whereclause_tree_walker, context);
@@ -455,7 +448,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	context->qualid = 0;
 	context->uniquequalid = 0;
 	context->count = oldcount;
-	context->filter_ratio = oldratio;
+	context->nbfiltered = oldfiltered;
 
 
 
@@ -635,7 +628,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	if (!found)
 	{
 		entry->count = 0;
-		entry->filter_ratio = -1;
+		entry->nbfiltered = 0;
 		entry->usage = 0;
 		entry->position = 0;
 		entry->qualnodeid = hashExpr((Expr *) expr, context, false);
@@ -660,14 +653,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 			pgqs_entry_dealloc();
 
 	}
-	if (entry->filter_ratio > -1)
-	{
-		entry->filter_ratio = ((entry->filter_ratio * entry->count) + (context->filter_ratio * context->count)) / (entry->count + context->count);
-	}
-	else
-	{
-		entry->filter_ratio = context->filter_ratio;
-	}
+	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
 	entry->usage += context->count;
 	LWLockRelease(pgqs->lock);
@@ -908,7 +894,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			{
 				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
 				entry->count = 0;
-				entry->filter_ratio = -1;
+				entry->nbfiltered = 0;
 				entry->usage = 0;
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
@@ -921,14 +907,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 					pgqs_entry_dealloc();
 			}
-			if (entry->filter_ratio > -1)
-			{
-				entry->filter_ratio = ((entry->filter_ratio * entry->count) + (context->filter_ratio * context->count)) / (entry->count + context->count);
-			}
-			else
-			{
-				entry->filter_ratio = context->filter_ratio;
-			}
+			entry->nbfiltered += context->nbfiltered;
 			entry->count += context->count;
 			entry->usage += context->count;
 			LWLockRelease(pgqs->lock);
@@ -1157,7 +1136,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = UInt32GetDatum(entry->qualnodeid);
 		values[i++] = UInt32GetDatum(entry->key.uniquequalnodeid);
 		values[i++] = Int64GetDatumFast(entry->count);
-		values[i++] = Float8GetDatumFast(entry->filter_ratio);
+		values[i++] = Int64GetDatumFast(entry->nbfiltered);
 		if (entry->position == -1)
 		{
 			nulls[i++] = true;

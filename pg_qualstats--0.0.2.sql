@@ -16,7 +16,7 @@ CREATE FUNCTION pg_qualstats(
   OUT qualnodeid    bigint,
   OUT uniquequalnodeid bigint,
   OUT count bigint,
-  OUT filter_ratio float8,
+  OUT nbfiltered bigint,
   OUT constant_position int,
   OUT queryid    bigint,
   OUT constvalue varchar,
@@ -39,7 +39,7 @@ CREATE FUNCTION pg_qualstats_names(
   OUT qualnodeid    bigint,
   OUT uniquequalnodeid bigint,
   OUT count bigint,
-  OUT filter_ratio float8,
+  OUT nbfiltered bigint,
   OUT constant_position int,
   OUT queryid    bigint,
   OUT constvalue varchar,
@@ -137,7 +137,7 @@ CREATE TYPE qualname AS (
 );
 
 CREATE OR REPLACE VIEW pg_qualstats_by_query AS
-        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, filter_ratio, queryid, dbname, rolname,
+        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, nbfiltered, queryid, dbname, rolname,
       array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno, eval_type)::qual) as quals,
       array_agg(distinct ROW(relname, attname, opname, eval_type)::qualname) AS qual_name
       FROM
@@ -161,7 +161,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.lattname as attname,
             qs.opname as opname,
             qs.constvalue as constvalue,
-            qs.filter_ratio as filter_ratio,
+            qs.nbfiltered as nbfiltered,
             qs.eval_type
         FROM pg_qualstats_names() qs
         WHERE qs.lrelid IS NOT NULL
@@ -184,11 +184,11 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.rattname as attname,
             qs.opname as opname,
             qs.constvalue as constvalue,
-            qs.filter_ratio as filter_ratio,
+            qs.nbfiltered as nbfiltered,
             qs.eval_type
         FROM pg_qualstats_names() qs
         WHERE qs.rrelid IS NOT NULL
-    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, filter_ratio, queryid, dbname, rolname;
+    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid, dbname, rolname;
 
 
 CREATE VIEW pg_qualstats_indexes AS
