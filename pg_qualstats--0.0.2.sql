@@ -96,29 +96,20 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
   FROM (
     SELECT
           qs.dbid,
-          qs.lrelid as relid,
+          CASE WHEN lrelid IS NOT NULL THEN lrelid
+               WHEN rrelid IS NOT NULL THEN rrelid
+          END as relid,
           qs.userid as userid,
-          qs.lattnum as attnum,
+          CASE WHEN lrelid IS NOT NULL THEN lattnum
+               WHEN rrelid IS NOT NULL THEN rattnum
+          END as attnum,
           qs.opno as opno,
           qs.qualid as qualid,
           qs.qualnodeid as qualnodeid,
           qs.count as count,
           qs.queryid
     FROM pg_qualstats() qs
-    WHERE qs.lrelid IS NOT NULL
-    UNION ALL
-    SELECT
-          qs.dbid,
-          qs.rrelid as relid,
-          qs.userid as userid,
-          qs.rattnum as attnum,
-          qs.opno as opno,
-          qs.qualid as qualid,
-          qs.qualnodeid as qualnodeid,
-          count as count,
-          qs.queryid
-    FROM pg_qualstats() qs
-    WHERE qs.rrelid IS NOT NULL
+    WHERE lrelid IS NOT NULL or rrelid IS NOT NULL
   ) t GROUP BY dbid, relid, userid, queryid, opno, coalesce(qualid, qualnodeid)
 ;
 
@@ -137,17 +128,20 @@ CREATE TYPE qualname AS (
 );
 
 CREATE OR REPLACE VIEW pg_qualstats_by_query AS
-        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, nbfiltered, queryid, dbname, rolname,
-      array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno, eval_type)::qual) as quals,
-      array_agg(distinct ROW(relname, attname, opname, eval_type)::qualname) AS qual_name
+        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, nbfiltered, queryid,
+      array_agg(distinct constvalue) as constvalues, array_agg(distinct ROW(relid, attnum, opno, eval_type)::qual) as quals
       FROM
       (
 
         SELECT
             qs.dbid,
-            qs.lrelid as relid,
+            CASE WHEN lrelid IS NOT NULL THEN lrelid
+                WHEN rrelid IS NOT NULL THEN rrelid
+            END as relid,
             qs.userid as userid,
-            qs.lattnum as attnum,
+            CASE WHEN lrelid IS NOT NULL THEN lattnum
+                WHEN rrelid IS NOT NULL THEN rattnum
+            END as attnum,
             qs.opno as opno,
             qs.qualid as qualid,
             qs.uniquequalid as uniquequalid,
@@ -155,40 +149,13 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.uniquequalnodeid as uniquequalnodeid,
             qs.count as count,
             qs.queryid as queryid,
-            qs.dbname as dbname,
-            qs.rolname as rolname,
-            qs.lrelname as relname,
-            qs.lattname as attname,
-            qs.opname as opname,
             qs.constvalue as constvalue,
             qs.nbfiltered as nbfiltered,
             qs.eval_type
-        FROM pg_qualstats_names() qs
-        WHERE qs.lrelid IS NOT NULL
-        UNION
-        SELECT
-            qs.dbid,
-            qs.rrelid as relid,
-            qs.userid as userid,
-            qs.rattnum as attnum,
-            qs.opno as opno,
-            qs.qualid as qualid,
-            qs.uniquequalid as uniquequalid,
-            qs.qualnodeid as qualnodeid,
-            qs.uniquequalnodeid as uniquequalnodeid,
-            count as count,
-            qs.queryid as queryid,
-            qs.dbname as dbname,
-            qs.rolname as rolname,
-            qs.rrelname as relname,
-            qs.rattname as attname,
-            qs.opname as opname,
-            qs.constvalue as constvalue,
-            qs.nbfiltered as nbfiltered,
-            qs.eval_type
-        FROM pg_qualstats_names() qs
-        WHERE qs.rrelid IS NOT NULL
-    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid, dbname, rolname;
+        FROM pg_qualstats() qs
+        WHERE qs.lrelid IS NOT NULL or qs.rrelid IS NOT NULL
+    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid
+;
 
 
 CREATE VIEW pg_qualstats_indexes AS
