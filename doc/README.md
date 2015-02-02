@@ -29,10 +29,11 @@ This project is sponsored by [Dalibo](http://dalibo.com)
 Installation
 ------------
 
-- Compatible with PostgreSQL 9.3 and 9.4
+- Compatible with PostgreSQL 9.4
 - Needs postgresql header files
 - sudo make install
 - Add pg_qualstats to the shared preload libraries:
+
 ```
    shared_preload_libraries = 'pg_qualstats'
 ```
@@ -42,7 +43,18 @@ Configuration
 
 The following GUCs can be configured, in postgresql.conf:
 
+- pg_qualstats.enabled (boolean, default true): whether or not pg_qualstats should be enabled
+- pg_qualstats.track_constants (bolean, default true): whether or not
+  pg_qualstats should keep track of each constant value individually. Disabling
+  this GUC will considerably reduce the number of entries necessary to keep
+  track of predicates.
 - pg_qualstats.max: the maximum number of statements tracked (defaults to 1000)
+- pg_qualstats.resolve_oids (boolean, default false): whether or not
+  pg_qualstats should resolve_oids at query time, or juste store the oids.
+  Enabling this parameter makes the data analysis much more easy, since a
+  connection to the database where the query was executed won't be necessary,
+  but it will eat much more space (616 bytes per entry instead of 168).
+  Additionnaly, this will require some catalog lookups, which aren't free.
 
 Usage
 -----
@@ -141,13 +153,5 @@ ro=# select * from pg_qualstats_indexes;
 (9 rows)
 ```
 
-
-Todo
-----
-
-- Test, and ensure it doesnt crash
-- Add pg_qualstats_foreignkeys for suggesting FKs (frequently joined together
-  columns)
-- Normalize queries to eliminate constants
-- Function or example in docs on how to use pg_qualstats with
-  pg_stats_statements.
+  - pg_qualstats_by_query: returns only predicates of the form VAR OPERATOR
+    CONSTANT, aggregated by queryid.
