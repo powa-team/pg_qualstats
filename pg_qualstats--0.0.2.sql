@@ -153,7 +153,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.nbfiltered as nbfiltered,
             qs.eval_type
         FROM pg_qualstats() qs
-        WHERE qs.lrelid IS NOT NULL or qs.rrelid IS NOT NULL
+        WHERE qs.lrelid IS NULL != qs.rrelid IS NULL
     ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid
 ;
 
