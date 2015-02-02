@@ -33,6 +33,7 @@
 #include "optimizer/var.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
+#include "parser/parsetree.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "utils/array.h"
@@ -74,7 +75,6 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
-
 
 
 
@@ -154,6 +154,11 @@ typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
 	List	   *rtable;
+	PlanState *inner_planstate;
+	PlanState *outer_planstate;
+	List *outer_tlist;
+	List *inner_tlist;
+	List *index_tlist;
 	uint32		qualid;
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
@@ -171,6 +176,8 @@ static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, Lis
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
 static uint32 hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const);
 static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const);
+static void pgqs_set_planstates(PlanState * planstate, pgqsWalkerContext *context);
+static Expr * pgqs_resolve_var(Var* var, pgqsWalkerContext *context);
 
 
 static void pgqs_entry_dealloc(void);
@@ -426,11 +433,11 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *parent = 0;
 	List	   *indexquals = 0;
 	List	   *quals = 0;
-
 	switch (nodeTag(plan))
 	{
-		case T_IndexScan:
 		case T_IndexOnlyScan:
+		case T_IndexScan:
+		case T_BitmapIndexScan:
 			indexquals = ((IndexScan *) plan)->indexqualorig;
 			/* fallthrough general case */
 		case T_CteScan:
@@ -442,19 +449,22 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		case T_ValuesScan:
 		case T_WorkTableScan:
 		case T_ForeignScan:
-		case T_BitmapIndexScan:
 		case T_ModifyTable:
 			quals = plan->qual;
 			break;
 		case T_NestLoop:
+			break;
 		case T_MergeJoin:
+			quals = ((MergeJoin*) plan)->mergeclauses;
+			break;
 		case T_HashJoin:
-			/* TODO: compute more stuff */
+			quals = ((HashJoin*) plan)->hashclauses;
 			break;
 		default:
 			break;
 
 	}
+	pgqs_set_planstates(planstate, context);
 	parent = list_union(indexquals, quals);
 	if (list_length(parent) > 1)
 	{
@@ -475,8 +485,6 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	context->uniquequalid = 0;
 	context->count = oldcount;
 	context->nbfiltered = oldfiltered;
-
-
 
 	foreach(lc, planstate->initPlan)
 	{
@@ -603,15 +611,18 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	pgqsEntry  *entry;
 	bool		found;
 	Var		   *var;
+	Expr	   *newexpr = NULL;
 	char	   *constant;
 	Oid			opoid;
 	RangeTblEntry *rte;
-
-	if (!IsA(expr->arg, Var))
+	if(IsA(expr->arg, Var)){
+		newexpr = pgqs_resolve_var((Var *) expr->arg, context);
+	}
+	if (!(newexpr && IsA(newexpr, Var)))
 	{
 		return NULL;
 	}
-	var = (Var *) expr->arg;
+	var = (Var *) newexpr;
 	rte = list_nth(context->rtable, var->varno - 1);
 	switch (expr->booltesttype)
 	{
@@ -815,14 +826,16 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
 		}
+		if(IsA(node, Var)){
+			node = (Node *) pgqs_resolve_var((Var *) node, context);
+		}
 		switch (node->type)
 		{
 			case T_Var:
-				var = (Var *) node;
+				var = (Var*) node;
 				{
-					/* Register it */
-					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
-
+					RangeTblEntry *rte;
+					rte = list_nth(context->rtable, var->varno - 1);
 					if (rte->rtekind == RTE_RELATION)
 					{
 						tempentry.lrelid = rte->relid;
@@ -855,12 +868,15 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			node = lsecond(expr->args);
 			sreliddest = &(tempentry.rrelid);
 			sattnumdest = &(tempentry.rattnum);
-
 		}
+		if(IsA(node, Var)){
+			node = (Node *) pgqs_resolve_var((Var *) node, context);
+		}
+
 		switch (node->type)
 		{
 			case T_Var:
-				var = (Var *) node;
+				var = (Var*) node;
 				{
 					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
@@ -1247,6 +1263,87 @@ pgqs_hash_fn(const void *key, Size keysize)
 		hash_uint32((uint32) k->evaltype);
 }
 
+
+static void
+pgqs_set_planstates(PlanState * planstate, pgqsWalkerContext *context)
+{
+	context->outer_tlist = NIL;
+	context->inner_tlist = NIL;
+	context->index_tlist = NIL;
+	if (IsA(planstate, AppendState))
+		context->outer_planstate = ((AppendState *) planstate)->appendplans[0];
+	else if (IsA(planstate, MergeAppendState))
+		context->outer_planstate = ((MergeAppendState *) planstate)->mergeplans[0];
+	else if (IsA(planstate, ModifyTableState))
+		context->outer_planstate = ((ModifyTableState *) planstate)->mt_plans[0];
+	else
+		context->outer_planstate = outerPlanState(planstate);
+
+	if (context->outer_planstate)
+		context->outer_tlist = context->outer_planstate->plan->targetlist;
+	else
+		context->outer_tlist = NIL;
+
+	if (IsA(planstate, SubqueryScanState))
+		context->inner_planstate = ((SubqueryScanState *) planstate)->subplan;
+	else if (IsA(planstate, CteScanState))
+		context->inner_planstate = ((CteScanState *) planstate)->cteplanstate;
+	else
+		context->inner_planstate = innerPlanState(planstate);
+
+	if (context->inner_planstate)
+		context->inner_tlist = context->inner_planstate->plan->targetlist;
+	else
+		context->inner_tlist = NIL;
+	/* index_tlist is set only if it's an IndexOnlyScan */
+	if (IsA(planstate->plan, IndexOnlyScan))
+		context->index_tlist = ((IndexOnlyScan *) planstate->plan)->indextlist;
+	else
+		context->index_tlist = NIL;
+}
+
+static Expr*
+pgqs_resolve_var(Var* var, pgqsWalkerContext* context)
+{
+	List* tlist = NULL;
+	Expr* newvar = (Expr *) var;
+	PlanState *outer_planstate = context->outer_planstate;
+	PlanState *inner_planstate = context->inner_planstate;
+	List *outer_tlist = context->outer_tlist;
+	List *inner_tlist = context->inner_tlist;
+	List *index_tlist = context->index_tlist;
+	switch(var->varno)
+	{
+		case INNER_VAR:
+			tlist = context->inner_tlist;
+			pgqs_set_planstates(inner_planstate, context);
+			break;
+		case OUTER_VAR:
+			tlist = context->outer_tlist;
+			pgqs_set_planstates(outer_planstate, context);
+			break;
+		case INDEX_VAR:
+			tlist = context->index_tlist;
+			break;
+		default:
+			break;
+	}
+	if(tlist != NULL){
+		TargetEntry * entry = get_tle_by_resno(tlist, var->varattno);
+		newvar = entry->expr;
+		while(((Expr*) var != newvar) && IsA(newvar, Var)){
+			var = (Var*) newvar;
+			newvar = pgqs_resolve_var((Var*)var, context);
+		}
+	}
+	context->outer_planstate = outer_planstate;
+	context->inner_planstate = inner_planstate;
+	context->outer_tlist = outer_tlist;
+	context->inner_tlist = inner_tlist;
+	context->index_tlist = index_tlist;
+	return newvar;
+}
+
 /*
  * Estimate shared memory space needed.
  */
@@ -1283,6 +1380,10 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 	ListCell   *lc;
 
 	appendStringInfo(buffer, "%d-", expr->type);
+	if(IsA(expr, Var)){
+		expr = pgqs_resolve_var((Var *) expr, context);
+	}
+
 	switch (expr->type)
 	{
 		case T_List:
@@ -1297,7 +1398,7 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			break;
 		case T_Var:
 			{
-				Var		   *var = (Var *) expr;
+				Var * var = (Var*) expr;
 				RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
 				if (rte->rtekind == RTE_RELATION)
