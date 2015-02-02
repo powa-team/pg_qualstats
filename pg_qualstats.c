@@ -81,7 +81,8 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 static int	pgqs_max;			/* max # statements to track */
 static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
-
+static bool pgqs_enabled;
+static bool pgqs_track_constants;
 
 
 /*---- Data structures declarations ----*/
@@ -193,6 +194,27 @@ _PG_init(void)
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
+	DefineCustomBoolVariable("pg_qualstats.enabled",
+			"Enable / Disable pg_qualstats",
+			NULL,
+			&pgqs_enabled,
+			true,
+			PGC_USERSET,
+			0,
+			NULL,
+			NULL,
+			NULL);
+	DefineCustomBoolVariable("pg_qualstats.track_const",
+			"Enable / Disable pg_qualstats constants tracking",
+			NULL,
+			&pgqs_track_constants,
+			true,
+			PGC_USERSET,
+			0,
+			NULL,
+			NULL,
+			NULL);
+
 	DefineCustomIntVariable("pg_qualstats.max",
 			"Sets the maximum number of statements tracked by pg_qualstats.",
 							NULL,
@@ -221,7 +243,7 @@ _PG_init(void)
 							 NULL,
 							 &pgqs_track_pgcatalog,
 							 false,
-							 PGC_SUSET,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,
@@ -300,8 +322,10 @@ static void
 pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	/* Setup instrumentation */
-	queryDesc->instrument_options |= INSTRUMENT_ROWS;
-	queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
+	if(pgqs_enabled){
+		queryDesc->instrument_options |= INSTRUMENT_ROWS;
+		queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
+	}
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
 	else
@@ -312,16 +336,18 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
-	pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
+	if(pgqs_enabled){
+		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
-	context->queryId = queryDesc->plannedstmt->queryId;
-	context->rtable = queryDesc->plannedstmt->rtable;
-	context->count = 0;
-	context->qualid = 0;
-	context->uniquequalid = 0;
-	context->nbfiltered = 0;
-	context->evaltype = 0;
-	pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
+		context->queryId = queryDesc->plannedstmt->queryId;
+		context->rtable = queryDesc->plannedstmt->rtable;
+		context->count = 0;
+		context->qualid = 0;
+		context->uniquequalid = 0;
+		context->nbfiltered = 0;
+		context->evaltype = 0;
+		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
+	}
 	if (prev_ExecutorEnd)
 		prev_ExecutorEnd(queryDesc);
 	else
@@ -620,7 +646,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
 	key.uniquequalid = context->uniquequalid;
-	key.uniquequalnodeid = hashExpr((Expr *) expr, context, true);
+	key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
 	key.queryid = context->queryId;
 	key.evaltype = context->evaltype;
 	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
@@ -644,7 +670,11 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 			entry->lrelid = rte->relid;
 			entry->lattnum = var->varattno;
 		}
-		strncpy(entry->constvalue, constant, strlen(constant));
+		if(pgqs_track_constants){
+			strncpy(entry->constvalue, constant, strlen(constant));
+		} else {
+			memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
+		}
 		if (pgqs_resolve_oids)
 		{
 			pgqs_fillnames((pgqsEntryWithNames *) entry);
@@ -778,7 +808,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
 		key.uniquequalid = context->uniquequalid;
-		key.uniquequalnodeid = hashExpr((Expr *) expr, context, true);
+		key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
 		key.queryid = context->queryId;
 		key.evaltype = context->evaltype;
 		if (IsA(node, RelabelType))
@@ -884,7 +914,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				}
 			}
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-			if (constant != NULL)
+			if (constant != NULL && pgqs_track_constants)
 			{
 				get_const_expr(constant, buf);
 				position = constant->location;
@@ -950,7 +980,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
 				}
 				if ((boolexpr->boolop == AND_EXPR))
 				{
-					context->uniquequalid = hashExpr((Expr *) boolexpr, context, true);
+					context->uniquequalid = hashExpr((Expr *) boolexpr, context, pgqs_track_constants);
 					context->qualid = hashExpr((Expr *) boolexpr, context, false);
 				}
 				expression_tree_walker((Node *) boolexpr->args, pgqs_whereclause_tree_walker, context);
