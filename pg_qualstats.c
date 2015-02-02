@@ -131,12 +131,12 @@ typedef struct pgqsEntry
 	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
 												 * the right hand constant, if
 												 * any */
-	uint32		qualid;		/* Hash of the parent AND expression if any, 0
+	uint32		qualid;			/* Hash of the parent AND expression if any, 0
 								 * otherwise. */
 	uint32		qualnodeid;		/* Hash of the node itself */
 
 	int64		count;
-	int64 		nbfiltered;
+	int64		nbfiltered;
 	int			position;
 	double		usage;
 }	pgqsEntry;
@@ -154,15 +154,15 @@ typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
 	List	   *rtable;
-	PlanState *inner_planstate;
-	PlanState *outer_planstate;
-	List *outer_tlist;
-	List *inner_tlist;
-	List *index_tlist;
+	PlanState  *inner_planstate;
+	PlanState  *outer_planstate;
+	List	   *outer_tlist;
+	List	   *inner_tlist;
+	List	   *index_tlist;
 	uint32		qualid;
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
-	int64 		nbfiltered;
+	int64		nbfiltered;
 	char		evaltype;
 }	pgqsWalkerContext;
 
@@ -176,8 +176,8 @@ static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, Lis
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
 static uint32 hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const);
 static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const);
-static void pgqs_set_planstates(PlanState * planstate, pgqsWalkerContext *context);
-static Expr * pgqs_resolve_var(Var* var, pgqsWalkerContext *context);
+static void pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context);
+static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext * context);
 
 
 static void pgqs_entry_dealloc(void);
@@ -202,25 +202,25 @@ _PG_init(void)
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
 	DefineCustomBoolVariable("pg_qualstats.enabled",
-			"Enable / Disable pg_qualstats",
-			NULL,
-			&pgqs_enabled,
-			true,
-			PGC_USERSET,
-			0,
-			NULL,
-			NULL,
-			NULL);
+							 "Enable / Disable pg_qualstats",
+							 NULL,
+							 &pgqs_enabled,
+							 true,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 	DefineCustomBoolVariable("pg_qualstats.track_const",
-			"Enable / Disable pg_qualstats constants tracking",
-			NULL,
-			&pgqs_track_constants,
-			true,
-			PGC_USERSET,
-			0,
-			NULL,
-			NULL,
-			NULL);
+						  "Enable / Disable pg_qualstats constants tracking",
+							 NULL,
+							 &pgqs_track_constants,
+							 true,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	DefineCustomIntVariable("pg_qualstats.max",
 			"Sets the maximum number of statements tracked by pg_qualstats.",
@@ -329,7 +329,8 @@ static void
 pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	/* Setup instrumentation */
-	if(pgqs_enabled){
+	if (pgqs_enabled)
+	{
 		queryDesc->instrument_options |= INSTRUMENT_ROWS;
 		queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
 	}
@@ -343,7 +344,8 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
-	if(pgqs_enabled){
+	if (pgqs_enabled)
+	{
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
 		context->queryId = queryDesc->plannedstmt->queryId;
@@ -433,6 +435,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *parent = 0;
 	List	   *indexquals = 0;
 	List	   *quals = 0;
+
 	switch (nodeTag(plan))
 	{
 		case T_IndexOnlyScan:
@@ -455,10 +458,10 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		case T_NestLoop:
 			break;
 		case T_MergeJoin:
-			quals = ((MergeJoin*) plan)->mergeclauses;
+			quals = ((MergeJoin *) plan)->mergeclauses;
 			break;
 		case T_HashJoin:
-			quals = ((HashJoin*) plan)->hashclauses;
+			quals = ((HashJoin *) plan)->hashclauses;
 			break;
 		default:
 			break;
@@ -615,7 +618,9 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	char	   *constant;
 	Oid			opoid;
 	RangeTblEntry *rte;
-	if(IsA(expr->arg, Var)){
+
+	if (IsA(expr->arg, Var))
+	{
 		newexpr = pgqs_resolve_var((Var *) expr->arg, context);
 	}
 	if (!(newexpr && IsA(newexpr, Var)))
@@ -681,9 +686,12 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 			entry->lrelid = rte->relid;
 			entry->lattnum = var->varattno;
 		}
-		if(pgqs_track_constants){
+		if (pgqs_track_constants)
+		{
 			strncpy(entry->constvalue, constant, strlen(constant));
-		} else {
+		}
+		else
+		{
 			memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
 		}
 		if (pgqs_resolve_oids)
@@ -826,15 +834,17 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		{
 			node = (Node *) ((RelabelType *) node)->arg;
 		}
-		if(IsA(node, Var)){
+		if (IsA(node, Var))
+		{
 			node = (Node *) pgqs_resolve_var((Var *) node, context);
 		}
 		switch (node->type)
 		{
 			case T_Var:
-				var = (Var*) node;
+				var = (Var *) node;
 				{
 					RangeTblEntry *rte;
+
 					rte = list_nth(context->rtable, var->varno - 1);
 					if (rte->rtekind == RTE_RELATION)
 					{
@@ -869,14 +879,15 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			sreliddest = &(tempentry.rrelid);
 			sattnumdest = &(tempentry.rattnum);
 		}
-		if(IsA(node, Var)){
+		if (IsA(node, Var))
+		{
 			node = (Node *) pgqs_resolve_var((Var *) node, context);
 		}
 
 		switch (node->type)
 		{
 			case T_Var:
-				var = (Var*) node;
+				var = (Var *) node;
 				{
 					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
@@ -1265,7 +1276,7 @@ pgqs_hash_fn(const void *key, Size keysize)
 
 
 static void
-pgqs_set_planstates(PlanState * planstate, pgqsWalkerContext *context)
+pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context)
 {
 	context->outer_tlist = NIL;
 	context->inner_tlist = NIL;
@@ -1302,17 +1313,18 @@ pgqs_set_planstates(PlanState * planstate, pgqsWalkerContext *context)
 		context->index_tlist = NIL;
 }
 
-static Expr*
-pgqs_resolve_var(Var* var, pgqsWalkerContext* context)
+static Expr *
+pgqs_resolve_var(Var *var, pgqsWalkerContext * context)
 {
-	List* tlist = NULL;
-	Expr* newvar = (Expr *) var;
-	PlanState *outer_planstate = context->outer_planstate;
-	PlanState *inner_planstate = context->inner_planstate;
-	List *outer_tlist = context->outer_tlist;
-	List *inner_tlist = context->inner_tlist;
-	List *index_tlist = context->index_tlist;
-	switch(var->varno)
+	List	   *tlist = NULL;
+	Expr	   *newvar = (Expr *) var;
+	PlanState  *outer_planstate = context->outer_planstate;
+	PlanState  *inner_planstate = context->inner_planstate;
+	List	   *outer_tlist = context->outer_tlist;
+	List	   *inner_tlist = context->inner_tlist;
+	List	   *index_tlist = context->index_tlist;
+
+	switch (var->varno)
 	{
 		case INNER_VAR:
 			tlist = context->inner_tlist;
@@ -1328,12 +1340,15 @@ pgqs_resolve_var(Var* var, pgqsWalkerContext* context)
 		default:
 			break;
 	}
-	if(tlist != NULL){
-		TargetEntry * entry = get_tle_by_resno(tlist, var->varattno);
+	if (tlist != NULL)
+	{
+		TargetEntry *entry = get_tle_by_resno(tlist, var->varattno);
+
 		newvar = entry->expr;
-		while(((Expr*) var != newvar) && IsA(newvar, Var)){
-			var = (Var*) newvar;
-			newvar = pgqs_resolve_var((Var*)var, context);
+		while (((Expr *) var != newvar) && IsA(newvar, Var))
+		{
+			var = (Var *) newvar;
+			newvar = pgqs_resolve_var((Var *) var, context);
 		}
 	}
 	context->outer_planstate = outer_planstate;
@@ -1380,7 +1395,8 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 	ListCell   *lc;
 
 	appendStringInfo(buffer, "%d-", expr->type);
-	if(IsA(expr, Var)){
+	if (IsA(expr, Var))
+	{
 		expr = pgqs_resolve_var((Var *) expr, context);
 	}
 
@@ -1398,7 +1414,7 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			break;
 		case T_Var:
 			{
-				Var * var = (Var*) expr;
+				Var		   *var = (Var *) expr;
 				RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
 				if (rte->rtekind == RTE_RELATION)
