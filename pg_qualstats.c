@@ -211,7 +211,7 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
-	DefineCustomBoolVariable("pg_qualstats.track_const",
+	DefineCustomBoolVariable("pg_qualstats.track_constants",
 						  "Enable / Disable pg_qualstats constants tracking",
 							 NULL,
 							 &pgqs_track_constants,
