@@ -79,7 +79,8 @@ CREATE VIEW pg_qualstats_pretty AS
         nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
-        sum(count) as count
+        sum(count) as count,
+        sum(nbfiltered) as nbfiltered
   from pg_qualstats qs
   left join (pg_class cl inner join pg_namespace nl on nl.oid = cl.relnamespace) on cl.oid = qs.lrelid
   left join (pg_class cr inner join pg_namespace nr on nr.oid = cr.relnamespace) on cr.oid = qs.rrelid
@@ -153,7 +154,7 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.nbfiltered as nbfiltered,
             qs.eval_type
         FROM pg_qualstats() qs
-        WHERE qs.lrelid IS NULL != qs.rrelid IS NULL
+        WHERE (qs.lrelid IS NULL) != (qs.rrelid IS NULL)
     ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid
 ;
 
