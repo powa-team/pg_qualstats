@@ -4,7 +4,7 @@
    "version": "__VERSION__",
    "maintainer": "Ronan Dunklau <ronan.dunklau@dalibo.com>",
    "license": "postgresql",
-   "release_status": "testing",
+   "release_status": "stable",
    "provides": {
         "pg_qualstats": {
             "abstract": "An extension collecting statistics about predicates",
