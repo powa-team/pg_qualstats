@@ -1180,7 +1180,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->qualid);
+			values[i++] = Int64GetDatumFast(entry->qualid);
 		}
 		if (entry->key.uniquequalid == 0)
 		{
@@ -1188,10 +1188,10 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->key.uniquequalid);
+			values[i++] = Int64GetDatumFast(entry->key.uniquequalid);
 		}
-		values[i++] = UInt32GetDatum(entry->qualnodeid);
-		values[i++] = UInt32GetDatum(entry->key.uniquequalnodeid);
+		values[i++] = Int64GetDatumFast(entry->qualnodeid);
+		values[i++] = Int64GetDatumFast(entry->key.uniquequalnodeid);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Int64GetDatumFast(entry->nbfiltered);
 		if (entry->position == -1)
@@ -1208,7 +1208,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = UInt32GetDatum(entry->key.queryid);
+			values[i++] = Int64GetDatumFast(entry->key.queryid);
 		}
 		if (entry->constvalue)
 		{
