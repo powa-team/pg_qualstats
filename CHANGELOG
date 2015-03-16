@@ -1,0 +1,3 @@
+0.0.4:
+ - add inline documentation in the sql script
+ - fix a bug with 32bits builds (thanks to Alain Delorme for reporting it)
