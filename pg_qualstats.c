@@ -588,7 +588,14 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 		case T_Const:
 			/* Const is an array. */
 			{
-				ArrayType  *array_type = DatumGetArrayTypeP(((Const *) array)->constvalue);
+				Const	   *arrayconst = (Const *) array;
+				ArrayType  *array_type;
+
+				if (arrayconst->constisnull)
+				{
+					return NULL;
+				}
+				array_type = DatumGetArrayTypeP(arrayconst->constvalue);
 
 				if (ARR_NDIM(array_type) > 0)
 				{
