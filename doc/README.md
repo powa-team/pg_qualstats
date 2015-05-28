@@ -1,9 +1,6 @@
 pg_qualstats
 ============
 
-This software is EXPERIMENTAL and therefore NOT production ready. Use at your
-own risk.
-
 pg_qualstats is a PostgreSQL extension keeping statistics on predicates found
 in ```WHERE``` statements and ```JOIN``` clauses.
 
