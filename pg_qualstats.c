@@ -275,7 +275,11 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 {
 	HeapTuple	tp;
 
+#if PG_VERSION_NUM >= 90500
+	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid, true));
+#else
 	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid));
+#endif
 	namestrcpy(&(entry->names.datname), get_database_name(entry->entry.key.dbid));
 	if (entry->entry.lrelid != InvalidOid)
 	{
