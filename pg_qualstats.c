@@ -195,6 +195,12 @@ static pgqsSharedState *pgqs = NULL;
 void
 _PG_init(void)
 {
+	if (!process_shared_preload_libraries_in_progress)
+	{
+		elog(ERROR, "This module can only be loaded via shared_preload_libraries");
+		return;
+	}
+
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = pgqs_ExecutorStart;
 	prev_ExecutorEnd = ExecutorEnd_hook;
