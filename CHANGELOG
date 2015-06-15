@@ -1,3 +1,8 @@
+0.0.6:
+  - order quals and constants by their text positions.
+  - fix bug with Index-Only Scans, which where not correctly supported
+  - make pg_config configurable from the make invocation
+  - ensure pg_qualstats is in shared_preload_libraries
 0.0.5:
   - fix bug with = ANY(NULL) expressions
 0.0.4:
