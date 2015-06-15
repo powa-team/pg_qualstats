@@ -449,10 +449,14 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	switch (nodeTag(plan))
 	{
 		case T_IndexOnlyScan:
+			indexquals = ((IndexOnlyScan *) plan)->indexqual;
+			quals = plan->qual;
+			break;
 		case T_IndexScan:
 		case T_BitmapIndexScan:
 			indexquals = ((IndexScan *) plan)->indexqualorig;
-			/* fallthrough general case */
+			quals = plan->qual;
+			break;
 		case T_CteScan:
 		case T_SeqScan:
 		case T_BitmapHeapScan:
