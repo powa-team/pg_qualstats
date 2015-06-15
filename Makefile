@@ -5,7 +5,7 @@ REGRESS      = $(patsubst test/sql/%.sql,%,$(TESTS))
 REGRESS_OPTS = --inputdir=test
 DOCS         = $(wildcard doc/*.md)
 MODULES      = $(patsubst %.c,%,$(wildcard *.c))
-PG_CONFIG    = pg_config
+PG_CONFIG    ?= pg_config
 
 all:
 
