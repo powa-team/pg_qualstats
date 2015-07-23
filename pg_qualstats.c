@@ -61,10 +61,12 @@ extern Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats_names(PG_FUNCTION_ARGS);
 static Datum pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names);
+extern Datum pg_qualstats_example_query(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
 PG_FUNCTION_INFO_V1(pg_qualstats_names);
+PG_FUNCTION_INFO_V1(pg_qualstats_example_query);
 
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
@@ -76,8 +78,11 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
 
+#if PG_VERSION_NUM < 90500
+static uint32 pgqs_uint32_hashfn(const void *key, Size keysize);
+#endif
 
-
+static int  pgqs_query_size;
 static int	pgqs_max;			/* max # statements to track */
 static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
@@ -90,8 +95,10 @@ typedef struct pgqsSharedState
 {
 #if PG_VERSION_NUM >= 90400
 	LWLock	   *lock;			/* protects hashtable search/modification */
+	LWLock     *querylock;
 #else
 	LWLockId	lock;
+	LWLockId    querylock;
 #endif
 }	pgqsSharedState;
 
@@ -147,7 +154,18 @@ typedef struct pgqsEntryWithNames
 	pgqsNames	names;
 }	pgqsEntryWithNames;
 
+typedef  struct pgqsQueryStringHashKey {
+	uint32 queryid;
+} pgqsQueryStringHashKey;
 
+typedef struct pgqsQueryStringEntry
+{
+	pgqsQueryStringHashKey key;
+	/* Imperatively at the end of the struct
+	   This is actually of length query_size, which is track_activity_query_size
+	 */
+	char querytext[1];
+} pgqsQueryStringEntry;
 
 
 typedef struct pgqsWalkerContext
@@ -164,6 +182,7 @@ typedef struct pgqsWalkerContext
 	int64		count;
 	int64		nbfiltered;
 	char		evaltype;
+	const char *      querytext;
 }	pgqsWalkerContext;
 
 
@@ -188,6 +207,7 @@ static Size pgqs_memsize(void);
 
 /* Global Hash */
 static HTAB *pgqs_hash = NULL;
+static HTAB *pgqs_query_examples_hash = NULL;
 static pgqsSharedState *pgqs = NULL;
 
 
@@ -262,8 +282,10 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
+	parse_int(GetConfigOption("track_activity_query_size", false, false),
+			&pgqs_query_size, 0, NULL);
 	RequestAddinShmemSpace(pgqs_memsize());
-
+	RequestAddinLWLocks(2);
 }
 
 void
@@ -354,10 +376,12 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
+	pgqsQueryStringHashKey queryKey;
+	pgqsQueryStringEntry * queryEntry;
+	bool found;
 	if (pgqs_enabled)
 	{
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
-
 		context->queryId = queryDesc->plannedstmt->queryId;
 		context->rtable = queryDesc->plannedstmt->rtable;
 		context->count = 0;
@@ -365,7 +389,18 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		context->uniquequalid = 0;
 		context->nbfiltered = 0;
 		context->evaltype = 0;
+		context->querytext = queryDesc->sourceText;
+		queryKey.queryid = context->queryId;
+		LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+		queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+				context->queryId,
+				HASH_ENTER, &found);
+		if(!found){
+			strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+		}
+		LWLockRelease(pgqs->querylock);
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
+
 	}
 	if (prev_ExecutorEnd)
 		prev_ExecutorEnd(queryDesc);
@@ -701,6 +736,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		entry->lattnum = InvalidAttrNumber;
 		entry->rrelid = InvalidOid;
 		entry->rattnum = InvalidAttrNumber;
+
 
 		if (rte->rtekind == RTE_RELATION)
 		{
@@ -1053,14 +1089,21 @@ static void
 pgqs_shmem_startup(void)
 {
 	HASHCTL		info;
+	HASHCTL 	queryinfo;
 	bool		found;
 
 	if (prev_shmem_startup_hook)
 		prev_shmem_startup_hook();
 	pgqs = NULL;
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
+	pgqs = ShmemInitStruct("pg_qualstats",
+						   sizeof(pgqsSharedState),
+						   &found);
 	memset(&info, 0, sizeof(info));
+	memset(&queryinfo, 0, sizeof(queryinfo));
 	info.keysize = sizeof(pgqsHashKey);
+	queryinfo.keysize = sizeof(pgqsQueryStringHashKey);
+	queryinfo.entrysize = sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char);
 	if (pgqs_resolve_oids)
 	{
 		info.entrysize = sizeof(pgqsEntryWithNames);
@@ -1070,18 +1113,30 @@ pgqs_shmem_startup(void)
 		info.entrysize = sizeof(pgqsEntry);
 	}
 	info.hash = pgqs_hash_fn;
-	pgqs = ShmemInitStruct("pg_qualstats",
-						   sizeof(pgqsSharedState),
-						   &found);
 	if (!found)
 	{
 		/* First time through ... */
 		pgqs->lock = LWLockAssign();
+		pgqs->querylock = LWLockAssign();
 	}
+# if PG_VERSION_NUM < 90500
+	queryinfo.hash = pgqs_uint32_hashfn;
+# endif
 	pgqs_hash = ShmemInitHash("pg_qualstatements_hash",
 							  pgqs_max, pgqs_max,
 							  &info,
 							  HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
+
+	pgqs_query_examples_hash = ShmemInitHash("pg_qualqueryexamples_hash",
+							 pgqs_max, pgqs_max,
+							 &queryinfo,
+
+/* On PG > 9.5, use the HASH_BLOBS optimization for uint32 keys. */
+#if PG_VERSION_NUM >= 90500
+							 HASH_ELEM | HASH_BLOBS | HASH_FIXED_SIZE);
+# else
+							 HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
+# endif
 	LWLockRelease(AddinShmemInitLock);
 }
 
@@ -1278,6 +1333,22 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	return (Datum) 0;
 }
 
+Datum
+pg_qualstats_example_query(PG_FUNCTION_ARGS){
+	uint32 queryid = PG_GETARG_UINT32(0);
+	pgqsQueryStringEntry * entry;
+	bool found;
+	LWLockAcquire(pgqs->querylock, LW_SHARED);
+	entry = hash_search(pgqs_query_examples_hash, &queryid, HASH_FIND, &found);
+	LWLockRelease(pgqs->querylock);
+	if(found){
+		PG_RETURN_TEXT_P(cstring_to_text(entry->querytext));
+	} else {
+		PG_RETURN_NULL();
+	}
+}
+
+
 
 /*
  * Calculate hash value for a key
@@ -1397,6 +1468,12 @@ pgqs_memsize(void)
 	{
 		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntry)));
 	}
+	if (pgqs_track_constants)
+	{
+		// In that case, we also need an additional struct for storing
+		// non-normalized queries.
+		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsQueryStringEntry) * pgqs_query_size));
+	}
 	return size;
 }
 
@@ -1473,3 +1550,9 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			appendStringInfoString(buffer, nodeToString(expr));
 	}
 }
+
+# if PG_VERSION_NUM < 90500
+static uint32 pgqs_uint32_hashfn(const void *key, Size keysize){
+	return ((pgqsQueryStringHashKey*)key)->queryid;
+}
+# endif
