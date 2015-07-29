@@ -45,6 +45,7 @@
 #include "parser/parsetree.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
+#include "storage/spin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -140,6 +141,7 @@ typedef struct pgqsNames
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
+	slock_t		mutex;			/* protect the fields below only */
 	Oid			lrelid;			/* relation OID or NULL if not var */
 	AttrNumber	lattnum;		/* Attribute Number or NULL if not var */
 	Oid			opoid;			/* Operator OID */
@@ -196,6 +198,8 @@ typedef struct pgqsWalkerContext
 }	pgqsWalkerContext;
 
 
+static pgqsEntry *entry_alloc(pgqsHashKey *key, uint32 qualid,
+		uint32 qualnodeid);
 static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
 static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
@@ -712,7 +716,6 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 {
 	pgqsHashKey key;
 	pgqsEntry  *entry;
-	bool		found;
 	Var		   *var;
 	Expr	   *newexpr = NULL;
 	char	   *constant;
@@ -765,48 +768,60 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
 	key.queryid = context->queryId;
 	key.evaltype = context->evaltype;
-	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-	entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
-	if (!found)
+
+	LWLockAcquire(pgqs->lock, LW_SHARED);
+	entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_FIND, NULL);
+	if (!entry)
 	{
-		entry->count = 0;
-		entry->nbfiltered = 0;
-		entry->usage = 0;
-		entry->position = 0;
-		entry->qualnodeid = hashExpr((Expr *) expr, context, false);
-		entry->qualid = context->qualid;
-		entry->opoid = opoid;
-		entry->lrelid = InvalidOid;
-		entry->lattnum = InvalidAttrNumber;
-		entry->rrelid = InvalidOid;
-		entry->rattnum = InvalidAttrNumber;
+		/* We need an exclusive lock to make new hashtable entry - promote */
+		LWLockRelease(pgqs->lock);
+		LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 
+		entry = entry_alloc(&key, context->qualid,
+			hashExpr((Expr *) expr, context, false));
 
-		if (rte->rtekind == RTE_RELATION)
+		/* Take the mutex to update counters */
 		{
-			entry->lrelid = rte->relid;
-			entry->lattnum = var->varattno;
+			volatile pgqsEntry *e = (volatile pgqsEntry *) entry;
+
+			SpinLockAcquire(&e->mutex);
+
+			e->opoid = opoid;
+
+			if (rte->rtekind == RTE_RELATION)
+			{
+			e->lrelid = rte->relid;
+			e->lattnum = var->varattno;
+			}
+			if (pgqs_track_constants)
+				strncpy(entry->constvalue, constant, strlen(constant));
+
+			if (pgqs_resolve_oids)
+			{
+				pgqs_fillnames((pgqsEntryWithNames *) e);
+			}
+
+			SpinLockRelease(&e->mutex);
 		}
-		if (pgqs_track_constants)
-		{
-			strncpy(entry->constvalue, constant, strlen(constant));
-		}
-		else
-		{
-			memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
-		}
-		if (pgqs_resolve_oids)
-		{
-			pgqs_fillnames((pgqsEntryWithNames *) entry);
-		}
+
 		while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 			pgqs_entry_dealloc();
-
 	}
-	entry->nbfiltered += context->nbfiltered;
-	entry->count += context->count;
-	entry->usage += 1;
+
+	/* Take the mutex to update counters */
+	{
+		volatile pgqsEntry *e = (volatile pgqsEntry *) entry;
+
+		SpinLockAcquire(&e->mutex);
+
+		e->nbfiltered += context->nbfiltered;
+		e->count += context->count;
+		e->usage += 1;
+		SpinLockRelease(&e->mutex);
+	}
+
 	LWLockRelease(pgqs->lock);
+
 	return entry;
 }
 
@@ -910,7 +925,6 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		Node	   *node = linitial(expr->args);
 		Var		   *var = NULL;
 		Const	   *constant = NULL;
-		bool		found;
 		Oid		   *sreliddest = NULL;
 		AttrNumber *sattnumdest = NULL;
 		int			position = -1;
@@ -1045,29 +1059,52 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				position = constant->location;
 			}
 
-			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
-			if (!found)
+			LWLockAcquire(pgqs->lock, LW_SHARED);
+			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, NULL);
+			if (!entry)
 			{
-				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
-				entry->count = 0;
-				entry->nbfiltered = 0;
-				entry->usage = 0;
-				entry->position = position;
-				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
-				entry->qualid = context->qualid;
-				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
-				if (pgqs_resolve_oids)
+				/* We need an exclusive lock to make new hashtable entry - promote */
+				LWLockRelease(pgqs->lock);
+				LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+
+				entry = entry_alloc(&key, context->qualid,
+						hashExpr((Expr *) expr, context, false));
+
+				/* Take the mutex to update counters */
 				{
-					pgqs_fillnames((pgqsEntryWithNames *) entry);
+					volatile pgqsEntry *e = (volatile pgqsEntry *) entry;
+
+					SpinLockAcquire(&e->mutex);
+
+					memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+					e->position = position;
+					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
+					if (pgqs_resolve_oids)
+					{
+						pgqs_fillnames((pgqsEntryWithNames *) e);
+					}
+
+					SpinLockRelease(&e->mutex);
 				}
+
 				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
 					pgqs_entry_dealloc();
 			}
-			entry->nbfiltered += context->nbfiltered;
-			entry->count += context->count;
-			entry->usage += 1;
+
+			/* Take the mutex to update counters */
+			{
+				volatile pgqsEntry *e = (volatile pgqsEntry *) entry;
+
+				SpinLockAcquire(&e->mutex);
+
+				e->nbfiltered += context->nbfiltered;
+				e->count += context->count;
+				e->usage += 1;
+				SpinLockRelease(&e->mutex);
+			}
+
 			LWLockRelease(pgqs->lock);
+
 			return entry;
 		}
 	}
@@ -1392,7 +1429,43 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS){
 	}
 }
 
+/*
+ * Allocate a new pgqsEntry.
+ * Caller must hold an exlusive lock on pgqs->lock
+ */
+static pgqsEntry *
+entry_alloc(pgqsHashKey *key, uint32 qualid, uint32 qualnodeid)
+{
+	pgqsEntry  *entry;
+	bool		found;
 
+	/* Find or create an entry with desired hash code */
+	entry = (pgqsEntry *) hash_search(pgqs_hash, key, HASH_ENTER, &found);
+
+	if (!found)
+	{
+		/* New entry, initialize it */
+
+		/* initialize the mutex */
+		SpinLockInit(&entry->mutex);
+
+		/* setup default counter values */
+		entry->lrelid = InvalidOid;
+		entry->lattnum = InvalidAttrNumber;
+		entry->opoid = InvalidOid;
+		entry->rrelid = InvalidOid;
+		entry->rattnum = InvalidAttrNumber;
+		memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
+		entry->qualid = qualid;
+		entry->qualnodeid = qualnodeid;
+		entry->count = 0;
+		entry->nbfiltered = 0;
+		entry->position = 0;
+		entry->usage = 0;
+	}
+
+	return entry;
+}
 
 /*
  * Calculate hash value for a key
