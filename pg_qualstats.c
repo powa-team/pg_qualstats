@@ -3,10 +3,19 @@
  * pg_qualstats.c
  *		Track frequently used quals.
  *
- * This extension works by installing a planner hook, pgqs_planner.
- * This hook looks for every qual in the query, and stores the qual of the form:
+ * This extension works by installing a hooks on executor.
+ * The ExecutorStart hook will enable some instrumentation for the
+ * queries (INSTRUMENT_ROWS and INSTRUMENT_BUFFERS).
+ *
+ * The ExecutorEnd hook will look for every qual in the query, and
+ * stores the quals of the form:
  *		- EXPR OPERATOR CONSTANT
  *		- EXPR OPERATOR EXPR
+ *
+ * If pg_stat_statements is available, the statistics will be
+ * aggregated by queryid, and a not-normalized statement will be
+ * stored for each different queryid. This can allow third part tools
+ * to do some work on a real query easily.
  *
  * The implementation is heavily inspired by pg_stat_statements
  *
@@ -46,8 +55,9 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 17
-#define PGQS_NAME_COLUMNS 7
+#define PGQS_COLUMNS 17 /* number of columns in pg_qualstats  SRF */
+#define PGQS_NAME_COLUMNS 7 /* number of column added when using
+							   pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
@@ -94,11 +104,11 @@ static bool pgqs_track_constants;
 typedef struct pgqsSharedState
 {
 #if PG_VERSION_NUM >= 90400
-	LWLock	   *lock;			/* protects hashtable search/modification */
-	LWLock     *querylock;
+	LWLock	   *lock;			/* protects counters hashtable search/modification */
+	LWLock     *querylock;		/* protects query hashtable search/modification */
 #else
-	LWLockId	lock;
-	LWLockId    querylock;
+	LWLockId	lock;			/* protects counters hashtable search/modification */
+	LWLockId    querylock;		/* protects query hashtable search/modification */
 #endif
 }	pgqsSharedState;
 
@@ -142,10 +152,10 @@ typedef struct pgqsEntry
 								 * otherwise. */
 	uint32		qualnodeid;		/* Hash of the node itself */
 
-	int64		count;
-	int64		nbfiltered;
-	int			position;
-	double		usage;
+	int64		count; /* # of operator execution */
+	int64		nbfiltered; /* # of lines discarded by the operator */
+	int			position; /* content position in query text */
+	double		usage; /* # of qual execution, used for deallocation */
 }	pgqsEntry;
 
 typedef struct pgqsEntryWithNames
