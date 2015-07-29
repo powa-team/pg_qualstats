@@ -307,7 +307,9 @@ _PG_fini(void)
 	ExecutorEnd_hook = prev_ExecutorEnd;
 }
 
-
+/*
+ * Do catalog search to replace oids with corresponding objects name
+ */
 void
 pgqs_fillnames(pgqsEntryWithNames * entry)
 {
@@ -367,6 +369,9 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 	}
 }
 
+/*
+ * Request rows and buffers instrumentation if pgqs is enabled
+ */
 static void
 pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
@@ -383,6 +388,10 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 
 }
 
+/*
+ * Save a non normalized query for the queryid if no one already exists, and
+ * do all the stat collecting job
+ */
 static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
@@ -418,7 +427,9 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		standard_ExecutorEnd(queryDesc);
 }
 
-
+/*
+ * qsort comparator for sorting into increasing usage order
+ */
 static int
 entry_cmp(const void *lhs, const void *rhs)
 {
@@ -433,6 +444,10 @@ entry_cmp(const void *lhs, const void *rhs)
 		return 0;
 }
 
+/*
+ * Deallocate least used entries.
+ * Caller must hold an exlusive lock on pgqs->lock
+ */
 static void
 pgqs_entry_dealloc(void)
 {
