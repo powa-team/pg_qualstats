@@ -970,13 +970,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		}
 		if (var != NULL)
 		{
-
 			pgqsEntry  *entry;
 
 			if (!pgqs_track_pgcatalog)
 			{
 				HeapTuple	tp;
-
 
 				if (tempentry.lrelid != InvalidOid)
 				{
@@ -1007,12 +1005,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 					ReleaseSysCache(tp);
 				}
 			}
-			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 			if (constant != NULL && pgqs_track_constants)
 			{
 				get_const_expr(constant, buf);
 				position = constant->location;
 			}
+
+			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
 			if (!found)
 			{
@@ -1038,6 +1037,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			return entry;
 		}
 	}
+
 	return NULL;
 }
 
