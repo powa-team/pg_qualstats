@@ -771,7 +771,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	}
 	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
-	entry->usage += context->count;
+	entry->usage += 1;
 	LWLockRelease(pgqs->lock);
 	return entry;
 }
@@ -1033,7 +1033,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			}
 			entry->nbfiltered += context->nbfiltered;
 			entry->count += context->count;
-			entry->usage += context->count;
+			entry->usage += 1;
 			LWLockRelease(pgqs->lock);
 			return entry;
 		}
