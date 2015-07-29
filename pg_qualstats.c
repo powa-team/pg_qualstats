@@ -410,17 +410,36 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		context->evaltype = 0;
 		context->querytext = queryDesc->sourceText;
 		queryKey.queryid = context->queryId;
-		LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+
+		/* Lookup the hash table entry with a shared lock. */
+		LWLockAcquire(pgqs->querylock, LW_SHARED);
+
 		queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
 				context->queryId,
-				HASH_ENTER, &found);
-		if(!found){
-			strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+				HASH_FIND, &found);
+
+		/* Create the new entry if not present */
+		if(!found)
+		{
+			bool excl_found;
+
+			/* Need exclusive lock to add a new hashtable entry - promote */
+			LWLockRelease(pgqs->querylock);
+			LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+
+			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+					context->queryId,
+					HASH_ENTER, &excl_found);
+
+			/* Make sure it wasn't added by another backend */
+			if(!excl_found)
+				strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
 		}
+
 		LWLockRelease(pgqs->querylock);
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
-
 	}
+
 	if (prev_ExecutorEnd)
 		prev_ExecutorEnd(queryDesc);
 	else
