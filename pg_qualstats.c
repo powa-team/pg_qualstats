@@ -401,7 +401,6 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
 	pgqsQueryStringHashKey queryKey;
 	pgqsQueryStringEntry * queryEntry;
-	bool found;
 	if (pgqs_enabled)
 	{
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
@@ -415,32 +414,39 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		context->querytext = queryDesc->sourceText;
 		queryKey.queryid = context->queryId;
 
-		/* Lookup the hash table entry with a shared lock. */
-		LWLockAcquire(pgqs->querylock, LW_SHARED);
-
-		queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-				context->queryId,
-				HASH_FIND, &found);
-
-		/* Create the new entry if not present */
-		if(!found)
+		if (pgqs_track_constants)
 		{
-			bool excl_found;
+			/* Lookup the query example hash table entry with a shared lock. */
+			LWLockAcquire(pgqs->querylock, LW_SHARED);
 
-			/* Need exclusive lock to add a new hashtable entry - promote */
-			LWLockRelease(pgqs->querylock);
-			LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
-
-			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(
+					pgqs_query_examples_hash, &queryKey,
 					context->queryId,
-					HASH_ENTER, &excl_found);
+					HASH_FIND, NULL);
 
-			/* Make sure it wasn't added by another backend */
-			if(!excl_found)
-				strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+			/* Create the new entry if not present */
+			if(!queryEntry)
+			{
+				bool found;
+
+				/* Need exclusive lock to add a new hashtable entry - promote */
+				LWLockRelease(pgqs->querylock);
+				LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+
+				queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(
+						pgqs_query_examples_hash, &queryKey,
+						context->queryId,
+						HASH_ENTER,
+						&found);
+
+				/* Make sure it wasn't added by another backend */
+				if(!found)
+					strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+			}
+
+			LWLockRelease(pgqs->querylock);
 		}
 
-		LWLockRelease(pgqs->querylock);
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	}
 
@@ -1419,14 +1425,18 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS){
 	uint32 queryid = PG_GETARG_UINT32(0);
 	pgqsQueryStringEntry * entry;
 	bool found;
+
+	if(!pgqs_track_constants)
+		PG_RETURN_NULL();
+
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
 	entry = hash_search(pgqs_query_examples_hash, &queryid, HASH_FIND, &found);
 	LWLockRelease(pgqs->querylock);
-	if(found){
+
+	if(found)
 		PG_RETURN_TEXT_P(cstring_to_text(entry->querytext));
-	} else {
+	else
 		PG_RETURN_NULL();
-	}
 }
 
 /*
@@ -1587,9 +1597,12 @@ pgqs_memsize(void)
 	}
 	if (pgqs_track_constants)
 	{
-		// In that case, we also need an additional struct for storing
-		// non-normalized queries.
-		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsQueryStringEntry) * pgqs_query_size));
+		/*
+		 * In that case, we also need an additional struct for storing
+		 * non-normalized queries.
+		 */
+		size = add_size(size, hash_estimate_size(pgqs_max,
+				sizeof(pgqsQueryStringEntry) + sizeof(char) * pgqs_query_size));
 	}
 	return size;
 }
