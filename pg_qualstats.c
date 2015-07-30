@@ -1060,7 +1060,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			}
 
 			LWLockAcquire(pgqs->lock, LW_SHARED);
-			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, NULL);
+			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_FIND, NULL);
 			if (!entry)
 			{
 				/* We need an exclusive lock to make new hashtable entry - promote */
