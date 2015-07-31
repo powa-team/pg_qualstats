@@ -809,9 +809,6 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 
 			SpinLockRelease(&e->mutex);
 		}
-
-		while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
-			pgqs_entry_dealloc();
 	}
 
 	/* Take the mutex to update counters */
@@ -1092,9 +1089,6 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 					SpinLockRelease(&e->mutex);
 				}
-
-				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
-					pgqs_entry_dealloc();
 			}
 
 			/* Take the mutex to update counters */
@@ -1448,6 +1442,10 @@ entry_alloc(pgqsHashKey *key, uint32 qualid, uint32 qualnodeid)
 {
 	pgqsEntry  *entry;
 	bool		found;
+
+	/* make space if needed */
+	while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
+		pgqs_entry_dealloc();
 
 	/* Find or create an entry with desired hash code */
 	entry = (pgqsEntry *) hash_search(pgqs_hash, key, HASH_ENTER, &found);
