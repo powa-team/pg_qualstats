@@ -1082,7 +1082,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 					SpinLockAcquire(&e->mutex);
 
-					memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+					memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey) - sizeof(slock_t));
 					e->position = position;
 					strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
 					if (pgqs_resolve_oids)
