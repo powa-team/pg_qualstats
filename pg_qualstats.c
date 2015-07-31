@@ -433,6 +433,26 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 				LWLockRelease(pgqs->querylock);
 				LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
 
+				/* make space if needed */
+				if(hash_get_num_entries(pgqs_query_examples_hash) >= pgqs_max)
+				{
+					HASH_SEQ_STATUS hash_seq;
+					pgqsQueryStringEntry *del_entry;
+					bool ok;
+
+					hash_seq_init(&hash_seq, pgqs_query_examples_hash);
+					del_entry = hash_seq_search(&hash_seq);
+					if (del_entry != NULL)
+					{
+						//hash_search(pgqs_query_examples_hash, &del_entry->key, HASH_REMOVE, &ok);
+						//hash_search_with_hash_value(pgqs_query_examples_hash, &del_key, del_key.queryid, HASH_REMOVE, &ok);
+						hash_search_with_hash_value(pgqs_query_examples_hash, &del_entry->key, ((pgqsQueryStringHashKey) del_entry->key).queryid, HASH_REMOVE, &ok);
+						if (!ok)
+							elog(WARNING, "could not remove an entry, so sad");
+						hash_seq_term(&hash_seq);
+					}
+				}
+
 				queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(
 						pgqs_query_examples_hash, &queryKey,
 						context->queryId,
