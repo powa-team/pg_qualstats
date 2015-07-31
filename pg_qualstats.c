@@ -141,7 +141,6 @@ typedef struct pgqsNames
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
-	slock_t		mutex;			/* protect the fields below only */
 	Oid			lrelid;			/* relation OID or NULL if not var */
 	AttrNumber	lattnum;		/* Attribute Number or NULL if not var */
 	Oid			opoid;			/* Operator OID */
@@ -158,6 +157,7 @@ typedef struct pgqsEntry
 	int64		nbfiltered; /* # of lines discarded by the operator */
 	int			position; /* content position in query text */
 	double		usage; /* # of qual execution, used for deallocation */
+	slock_t		mutex;			/* protect the fields below only */
 }	pgqsEntry;
 
 typedef struct pgqsEntryWithNames
