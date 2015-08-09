@@ -20,6 +20,17 @@ LANGUAGE C;
 
 
 /*"""
+.. function pg_qualstats_example_queries()
+
+  Returns all the example queries with their associated queryid
+*/
+CREATE FUNCTION pg_qualstats_example_queries(OUT queryid oid, OUT query text)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+
+
+/*"""
 .. function:: pg_qualstats()
 
   Returns:

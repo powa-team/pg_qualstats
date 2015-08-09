@@ -77,6 +77,7 @@ PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
 PG_FUNCTION_INFO_V1(pg_qualstats_names);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_query);
+PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
@@ -1392,6 +1393,68 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS){
 	}
 }
 
+Datum
+pg_qualstats_example_queries(PG_FUNCTION_ARGS){
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	HASH_SEQ_STATUS hash_seq;
+	pgqsQueryStringEntry * entry;
+
+	if (!pgqs || !pgqs_query_examples_hash)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+		errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not " \
+						"allowed in this context")));
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	LWLockAcquire(pgqs->querylock, LW_SHARED);
+
+	hash_seq_init(&hash_seq, pgqs_query_examples_hash);
+
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		Datum	   values[2];
+		bool	   nulls[2];
+
+		memset(values, 0, sizeof(values));
+		memset(nulls, 0, sizeof(nulls));
+
+		values[0] = Int64GetDatumFast(entry->key.queryid);
+		values[1] = CStringGetTextDatum(entry->querytext);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+	}
+
+	LWLockRelease(pgqs->querylock);
+
+	return (Datum) 0;
+}
 
 
 /*
