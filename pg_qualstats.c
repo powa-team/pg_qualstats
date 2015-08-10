@@ -211,6 +211,7 @@ static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext * context);
 
 
 static void pgqs_entry_dealloc(void);
+static void pgqs_queryentry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
 static Size pgqs_memsize(void);
@@ -428,6 +429,9 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			LWLockRelease(pgqs->querylock);
 			LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
 
+			while (hash_get_num_entries(pgqs_query_examples_hash) >= pgqs_max)
+				pgqs_queryentry_dealloc();
+
 			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
 					context->queryId,
 					HASH_ENTER, &excl_found);
@@ -438,6 +442,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		}
 
 		LWLockRelease(pgqs->querylock);
+
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	}
 
@@ -512,6 +517,25 @@ pgqs_entry_dealloc(void)
 		hash_search(pgqs_hash, &entries[i]->key, HASH_REMOVE, NULL);
 	}
 	pfree(entries);
+}
+
+/*
+ * Deallocate the first example query.
+ * Caller must hold an exlusive lock on pgqs->querylock
+ */
+static void
+pgqs_queryentry_dealloc(void)
+{
+	HASH_SEQ_STATUS hash_seq;
+	pgqsQueryStringEntry *entry;
+
+	hash_seq_init(&hash_seq, pgqs_query_examples_hash);
+	entry = hash_seq_search(&hash_seq);
+
+	if (entry != NULL)
+		hash_search_with_hash_value(pgqs_query_examples_hash, &entry->key, ((pgqsQueryStringHashKey) entry->key).queryid, HASH_REMOVE, NULL);
+
+	hash_seq_term(&hash_seq);
 }
 
 static void
