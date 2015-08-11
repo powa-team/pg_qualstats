@@ -400,6 +400,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringHashKey queryKey;
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
+
 	if (pgqs_enabled)
 	{
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
@@ -413,35 +414,39 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		context->querytext = queryDesc->sourceText;
 		queryKey.queryid = context->queryId;
 
-		/* Lookup the hash table entry with a shared lock. */
-		LWLockAcquire(pgqs->querylock, LW_SHARED);
-
-		queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-				context->queryId,
-				HASH_FIND, &found);
-
-		/* Create the new entry if not present */
-		if(!found)
+		/* keep an unormalized query example for each queryid if needed */
+		if (pgqs_track_constants)
 		{
-			bool excl_found;
-
-			/* Need exclusive lock to add a new hashtable entry - promote */
-			LWLockRelease(pgqs->querylock);
-			LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
-
-			while (hash_get_num_entries(pgqs_query_examples_hash) >= pgqs_max)
-				pgqs_queryentry_dealloc();
+			/* Lookup the hash table entry with a shared lock. */
+			LWLockAcquire(pgqs->querylock, LW_SHARED);
 
 			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
 					context->queryId,
-					HASH_ENTER, &excl_found);
+					HASH_FIND, &found);
 
-			/* Make sure it wasn't added by another backend */
-			if(!excl_found)
-				strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+			/* Create the new entry if not present */
+			if(!found)
+			{
+				bool excl_found;
+
+				/* Need exclusive lock to add a new hashtable entry - promote */
+				LWLockRelease(pgqs->querylock);
+				LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+
+				while (hash_get_num_entries(pgqs_query_examples_hash) >= pgqs_max)
+					pgqs_queryentry_dealloc();
+
+				queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+						context->queryId,
+						HASH_ENTER, &excl_found);
+
+				/* Make sure it wasn't added by another backend */
+				if(!excl_found)
+					strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
+			}
+
+			LWLockRelease(pgqs->querylock);
 		}
-
-		LWLockRelease(pgqs->querylock);
 
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 	}
@@ -1410,9 +1415,15 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS){
 	uint32 queryid = PG_GETARG_UINT32(0);
 	pgqsQueryStringEntry * entry;
 	bool found;
+
+	/* don't search the hash table if track_constants isn't enabled */
+	if (!pgqs_track_constants)
+		PG_RETURN_NULL();
+
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
 	entry = hash_search(pgqs_query_examples_hash, &queryid, HASH_FIND, &found);
 	LWLockRelease(pgqs->querylock);
+
 	if(found){
 		PG_RETURN_TEXT_P(cstring_to_text(entry->querytext));
 	} else {
@@ -1458,6 +1469,10 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS){
 	rsinfo->setDesc = tupdesc;
 
 	MemoryContextSwitchTo(oldcontext);
+
+	/* don't need to scan the hash table if track_constants isn't enabled */
+	if (!pgqs_track_constants)
+		return (Datum) 0;
 
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
 
