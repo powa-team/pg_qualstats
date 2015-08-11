@@ -1281,8 +1281,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	rsinfo->returnMode = SFRM_Materialize;
 	rsinfo->setResult = tupstore;
 	rsinfo->setDesc = tupdesc;
-	hash_seq_init(&hash_seq, pgqs_hash);
+
 	LWLockAcquire(pgqs->lock, LW_SHARED);
+
+	hash_seq_init(&hash_seq, pgqs_hash);
+
 	if (include_names)
 	{
 		nb_columns += PGQS_NAME_COLUMNS;
