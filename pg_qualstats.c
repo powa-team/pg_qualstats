@@ -1619,9 +1619,12 @@ pgqs_memsize(void)
 	}
 	if (pgqs_track_constants)
 	{
-		// In that case, we also need an additional struct for storing
-		// non-normalized queries.
-		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsQueryStringEntry) * pgqs_query_size));
+		/*
+		 * In that case, we also need an additional struct for storing
+		 * non-normalized queries.
+		 */
+		size = add_size(size, hash_estimate_size(pgqs_max,
+				sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char)));
 	}
 	return size;
 }
