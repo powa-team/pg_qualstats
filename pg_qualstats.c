@@ -1414,14 +1414,18 @@ Datum
 pg_qualstats_example_query(PG_FUNCTION_ARGS){
 	uint32 queryid = PG_GETARG_UINT32(0);
 	pgqsQueryStringEntry * entry;
+	pgqsQueryStringHashKey queryKey;
 	bool found;
 
 	/* don't search the hash table if track_constants isn't enabled */
 	if (!pgqs_track_constants)
 		PG_RETURN_NULL();
 
+	queryKey.queryid = queryid;
+
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
-	entry = hash_search(pgqs_query_examples_hash, &queryid, HASH_FIND, &found);
+	entry = hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+			queryid, HASH_FIND, &found);
 	LWLockRelease(pgqs->querylock);
 
 	if(found){
