@@ -579,6 +579,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			quals = plan->qual;
 			break;
 		case T_NestLoop:
+			quals = ((NestLoop *) plan)->join.joinqual;
 			break;
 		case T_MergeJoin:
 			quals = ((MergeJoin *) plan)->mergeclauses;
