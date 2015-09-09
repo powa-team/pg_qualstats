@@ -1703,6 +1703,10 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 				appendStringInfoChar(buffer, '?');
 			}
 			break;
+		case T_CoerceViaIO:
+			exprRepr((Expr *) ((CoerceViaIO *) expr)->arg, buffer, context, include_const);
+			appendStringInfo(buffer, "|%d", ((CoerceViaIO *) expr)->resulttype);
+			break;
 		default:
 			appendStringInfoString(buffer, nodeToString(expr));
 	}
