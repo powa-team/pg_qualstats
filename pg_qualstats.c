@@ -1317,7 +1317,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}
-		values[i++] = Int16GetDatum(entry->opoid);
+		values[i++] = Int32GetDatum(entry->opoid);
 		if (entry->rattnum != InvalidAttrNumber)
 		{
 			values[i++] = ObjectIdGetDatum(entry->rrelid);
