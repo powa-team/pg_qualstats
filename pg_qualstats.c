@@ -1707,6 +1707,17 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			exprRepr((Expr *) ((CoerceViaIO *) expr)->arg, buffer, context, include_const);
 			appendStringInfo(buffer, "|%d", ((CoerceViaIO *) expr)->resulttype);
 			break;
+		case T_FuncExpr:
+			appendStringInfo(buffer, "|%d(", ((FuncExpr *) expr)->funcid);
+			exprRepr((Expr *) ((FuncExpr *) expr)->args, buffer, context, include_const);
+			appendStringInfoString(buffer, ")");
+			break;
+		case T_MinMaxExpr:
+			appendStringInfo(buffer, "|minmax%d(", ((MinMaxExpr *)expr)->op);
+			exprRepr((Expr *) ((MinMaxExpr*) expr)->args, buffer, context, include_const);
+			appendStringInfoString(buffer, ")");
+			break;
+
 		default:
 			appendStringInfoString(buffer, nodeToString(expr));
 	}
