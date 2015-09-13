@@ -56,7 +56,9 @@ LANGUAGE C;
         predicates which are used together.
       qualnodeid(bigint):
         the predicate hash. Everything (down to constants) is used to compute this hash
-      count (bigint):
+	  occurences (bigint):
+	  	the number of times this predicate has been seen
+      execution_count (bigint):
         the total number of execution of this predicate.
       nbfiltered (bigint):
         the number of lines filtered by this predicate
@@ -90,7 +92,8 @@ LANGUAGE C;
       uniquequalid      |
       qualnodeid        | 1711571257
       uniquequalnodeid  | 466568149
-      count             | 1206
+	  occurences				| 1
+      execution_count             | 1206
       nbfiltered        | 0
       constant_position | 47
       queryid           | 3644521490
@@ -109,7 +112,8 @@ CREATE FUNCTION pg_qualstats(
   OUT uniquequalid bigint,
   OUT qualnodeid    bigint,
   OUT uniquequalnodeid bigint,
-  OUT count bigint,
+  OUT occurences bigint,
+  OUT execution_count bigint,
   OUT nbfiltered bigint,
   OUT constant_position int,
   OUT queryid    bigint,
@@ -152,7 +156,7 @@ CREATE FUNCTION pg_qualstats_names(
   OUT uniquequalid bigint,
   OUT qualnodeid    bigint,
   OUT uniquequalnodeid bigint,
-  OUT count bigint,
+  OUT execution_count bigint,
   OUT nbfiltered bigint,
   OUT constant_position int,
   OUT queryid    bigint,
@@ -208,7 +212,7 @@ REVOKE ALL ON FUNCTION pg_qualstats_reset() FROM PUBLIC;
       the name of the right-hand side relation.
     right_column (name):
       the name of the operator.
-    count (bigint):
+    execution_count (bigint):
       the total number of time this qual was executed.
     nbfiltered (bigint):
       the total number of tuples filtered by this qual.
@@ -222,7 +226,7 @@ CREATE VIEW pg_qualstats_pretty AS
         nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
-        sum(count) as count,
+        sum(execution_count) as execution_count,
         sum(nbfiltered) as nbfiltered
   from pg_qualstats qs
   left join (pg_class cl inner join pg_namespace nl on nl.oid = cl.relnamespace) on cl.oid = qs.lrelid
@@ -234,7 +238,7 @@ CREATE VIEW pg_qualstats_pretty AS
 
 
 CREATE OR REPLACE VIEW pg_qualstats_all AS
-  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(qualid) as qualid, sum(count) as count,
+  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(qualid) as qualid, sum(execution_count) as execution_count,
     coalesce(qualid, qualnodeid) as qualnodeid
   FROM (
     SELECT
@@ -249,7 +253,7 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.opno as opno,
           qs.qualid as qualid,
           qs.qualnodeid as qualnodeid,
-          qs.count as count,
+          qs.execution_count as execution_count,
           qs.queryid
     FROM pg_qualstats() qs
     WHERE lrelid IS NOT NULL or rrelid IS NOT NULL
@@ -301,7 +305,7 @@ CREATE TYPE qualname AS (
 );
 
 CREATE OR REPLACE VIEW pg_qualstats_by_query AS
-        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, count, nbfiltered, queryid,
+        SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, occurences, execution_count, nbfiltered, queryid,
       array_agg(constvalue order by constant_position) as constvalues, array_agg(ROW(relid, attnum, opno, eval_type)::qual) as quals
       FROM
       (
@@ -320,7 +324,8 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.uniquequalid as uniquequalid,
             qs.qualnodeid as qualnodeid,
             qs.uniquequalnodeid as uniquequalnodeid,
-            qs.count as count,
+            qs.occurences as occurences,
+            qs.execution_count as execution_count,
             qs.queryid as queryid,
             qs.constvalue as constvalue,
             qs.nbfiltered as nbfiltered,
@@ -328,14 +333,14 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.constant_position
         FROM pg_qualstats() qs
         WHERE (qs.lrelid IS NULL) != (qs.rrelid IS NULL)
-    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, count, nbfiltered, queryid
+    ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, occurences, execution_count, nbfiltered, queryid
 ;
 
 
 CREATE VIEW pg_qualstats_indexes AS
-SELECT relid::regclass, attnames, possible_types, sum(count) as count
+SELECT relid::regclass, attnames, possible_types, sum(execution_count) as execution_count
 FROM (
-  SELECT qs.relid::regclass, array_agg(distinct attnames) as attnames, array_agg(distinct amname) as possible_types, max(count) as count, array_agg(distinct attnum) as attnums
+  SELECT qs.relid::regclass, array_agg(distinct attnames) as attnames, array_agg(distinct amname) as possible_types, max(execution_count) as execution_count, array_agg(distinct attnum) as attnums
   FROM pg_qualstats_all as qs
   INNER JOIN pg_amop amop ON amop.amopopr = opno
   INNER JOIN pg_am on amop.amopmethod = pg_am.oid,
@@ -389,19 +394,19 @@ CREATE OR REPLACE VIEW pg_qualstats_indexes_ddl AS
     q.relid,
     q.attnames,
     q.idxtype,
-    q.count,
+    q.execution_count,
     'CREATE INDEX idx_' || relid || '_' || array_to_string(attnames, '_') || ' ON ' || nspname || '.' || relid ||  ' USING ' || idxtype || ' (' || array_to_string(attnames, ', ') || ')'  AS ddl
  FROM (SELECT t.nspname,
     t.relid,
     t.attnames,
     unnest(t.possible_types) AS idxtype,
-    sum(t.count) AS count
+    sum(t.execution_count) AS execution_count
 
    FROM ( SELECT nl.nspname AS nspname,
             qs.relid::regclass AS relid,
             array_agg(DISTINCT attnames.attnames) AS attnames,
             array_agg(DISTINCT pg_am.amname) AS possible_types,
-            max(qs.count) AS count,
+            max(qs.execution_count) AS execution_count,
             array_agg(DISTINCT attnum.attnum) AS attnums
            FROM pg_qualstats_all qs
            LEFT JOIN (pg_class cl JOIN pg_namespace nl ON nl.oid = cl.relnamespace) ON cl.oid = qs.relid

@@ -157,6 +157,7 @@ typedef struct pgqsEntry
 	int64		nbfiltered; /* # of lines discarded by the operator */
 	int			position; /* content position in query text */
 	double		usage; /* # of qual execution, used for deallocation */
+	int64		occurences;
 }	pgqsEntry;
 
 typedef struct pgqsEntryWithNames
@@ -463,8 +464,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 static int
 entry_cmp(const void *lhs, const void *rhs)
 {
-	double		l_usage = (*(pgqsEntry * const *) lhs)->count;
-	double		r_usage = (*(pgqsEntry * const *) rhs)->count;
+	double		l_usage = (*(pgqsEntry * const *) lhs)->usage;
+	double		r_usage = (*(pgqsEntry * const *) rhs)->usage;
 
 	if (l_usage < r_usage)
 		return -1;
@@ -803,6 +804,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		entry->count = 0;
 		entry->nbfiltered = 0;
 		entry->usage = 0;
+		entry->occurences = 0;
 		entry->position = 0;
 		entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 		entry->qualid = context->qualid;
@@ -837,6 +839,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
 	entry->usage += 1;
+	entry->occurences += 1;
 	LWLockRelease(pgqs->lock);
 	return entry;
 }
@@ -1084,6 +1087,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->count = 0;
 				entry->nbfiltered = 0;
 				entry->usage = 0;
+				entry->occurences = 0;
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 				entry->qualid = context->qualid;
@@ -1098,6 +1102,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			entry->nbfiltered += context->nbfiltered;
 			entry->count += context->count;
 			entry->usage += 1;
+			entry->occurences += 1;
 			LWLockRelease(pgqs->lock);
 			return entry;
 		}
@@ -1346,6 +1351,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		values[i++] = Int64GetDatumFast(entry->qualnodeid);
 		values[i++] = Int64GetDatumFast(entry->key.uniquequalnodeid);
+		values[i++] = Int64GetDatumFast(entry->occurences);
 		values[i++] = Int64GetDatumFast(entry->count);
 		values[i++] = Int64GetDatumFast(entry->nbfiltered);
 		if (entry->position == -1)
@@ -1648,7 +1654,9 @@ static void
 exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const)
 {
 	ListCell   *lc;
-
+	if(expr == NULL){
+		return;
+	}
 	appendStringInfo(buffer, "%d-", expr->type);
 	if (IsA(expr, Var))
 	{
