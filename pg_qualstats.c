@@ -223,6 +223,8 @@ static HTAB *pgqs_hash = NULL;
 static HTAB *pgqs_query_examples_hash = NULL;
 static pgqsSharedState *pgqs = NULL;
 
+/* Local Hash */
+static HTAB *pgqs_localhash = NULL;
 
 
 void
@@ -404,7 +406,12 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 
 	if (pgqs_enabled)
 	{
+		HASHCTL		info;
+		pgqsEntry  *localentry;
+		pgqsEntry *newEntry;
+		HASH_SEQ_STATUS local_hash_seq;
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
+
 		context->queryId = queryDesc->plannedstmt->queryId;
 		context->rtable = queryDesc->plannedstmt->rtable;
 		context->count = 0;
@@ -449,7 +456,62 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			LWLockRelease(pgqs->querylock);
 		}
 
+		/* create local hash table if it hasn't been created yet */
+		if (! pgqs_localhash)
+		{
+			memset(&info, 0, sizeof(info));
+			info.keysize = sizeof(pgqsHashKey);
+			if (pgqs_resolve_oids)
+			{
+				info.entrysize = sizeof(pgqsEntryWithNames);
+			}
+			else
+			{
+				info.entrysize = sizeof(pgqsEntry);
+			}
+			info.hash = pgqs_hash_fn;
+
+			pgqs_localhash = hash_create("pgqs_localhash",
+					50,
+					&info,
+					HASH_ELEM | HASH_FUNCTION);
+		}
+
+		/* retrieve quals informations, main work starts from here */
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
+
+		/* store en shared memory found quals, if any */
+		LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+
+		while (hash_get_num_entries(pgqs_hash) +
+				hash_get_num_entries(pgqs_localhash) >= pgqs_max)
+			pgqs_entry_dealloc();
+
+		hash_seq_init(&local_hash_seq, pgqs_localhash);
+		while ((localentry = hash_seq_search(&local_hash_seq)) != NULL)
+		{
+			newEntry = (pgqsEntry *) hash_search(pgqs_hash, &localentry->key,
+					HASH_ENTER, &found);
+
+			if (!found)
+			{
+				/* raw copy the local entry */
+				memcpy(&(newEntry->lrelid), &(localentry->lrelid),
+					sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+			}
+			else
+			{
+				/* only update counters value */
+				newEntry->count += localentry->count;
+				newEntry->nbfiltered += localentry->nbfiltered;
+				newEntry->position += localentry->position;
+				newEntry->usage += localentry->usage;
+			}
+			/* cleanup local hash */
+			hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
+		}
+
+		LWLockRelease(pgqs->lock);
 	}
 
 	if (prev_ExecutorEnd)
@@ -797,8 +859,9 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
 	key.queryid = context->queryId;
 	key.evaltype = context->evaltype;
-	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-	entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
+
+	/* local hash, no lock needed */
+	entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER, &found);
 	if (!found)
 	{
 		entry->count = 0;
@@ -832,15 +895,13 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		{
 			pgqs_fillnames((pgqsEntryWithNames *) entry);
 		}
-		while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
-			pgqs_entry_dealloc();
 
 	}
 	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
 	entry->usage += 1;
 	entry->occurences += 1;
-	LWLockRelease(pgqs->lock);
+
 	return entry;
 }
 
@@ -1079,8 +1140,9 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				position = constant->location;
 			}
 
-			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-			entry = (pgqsEntry *) hash_search(pgqs_hash, &key, HASH_ENTER, &found);
+			/* local hash, no lock needed */
+			entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER,
+					&found);
 			if (!found)
 			{
 				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
@@ -1103,7 +1165,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			entry->count += context->count;
 			entry->usage += 1;
 			entry->occurences += 1;
-			LWLockRelease(pgqs->lock);
+
 			return entry;
 		}
 	}
