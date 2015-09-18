@@ -1472,6 +1472,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 				}
 			}
 		}
+		Assert(i == nb_columns);
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 	LWLockRelease(pgqs->lock);
