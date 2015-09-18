@@ -506,6 +506,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 				newEntry->nbfiltered += localentry->nbfiltered;
 				newEntry->position += localentry->position;
 				newEntry->usage += localentry->usage;
+				newEntry->occurences += localentry->occurences;
 			}
 			/* cleanup local hash */
 			hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
