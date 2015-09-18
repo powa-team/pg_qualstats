@@ -55,7 +55,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 17 /* number of columns in pg_qualstats  SRF */
+#define PGQS_COLUMNS 18 /* number of columns in pg_qualstats  SRF */
 #define PGQS_NAME_COLUMNS 7 /* number of column added when using
 							   pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
