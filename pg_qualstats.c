@@ -34,6 +34,7 @@
 #include "commands/dbcommands.h"
 #include "fmgr.h"
 #include "funcapi.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "nodes/nodeFuncs.h"
@@ -886,7 +887,11 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		}
 		if (pgqs_track_constants)
 		{
-			strncpy(entry->constvalue, constant, strlen(constant));
+			char * utf8const = (char *) pg_do_encoding_conversion((unsigned char*)constant,
+					strlen(constant),
+					GetDatabaseEncoding(),
+					PG_UTF8);
+			strncpy(entry->constvalue, utf8const, strlen(utf8const));
 		}
 		else
 		{
@@ -1154,7 +1159,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 				entry->qualid = context->qualid;
-				strncpy(entry->constvalue, buf->data, PGQS_CONSTANT_SIZE);
+				strncpy(entry->constvalue, (char*) pg_do_encoding_conversion((unsigned char*) buf->data,
+							strlen(buf->data),
+							GetDatabaseEncoding(),
+							PG_UTF8),
+							PGQS_CONSTANT_SIZE);
 				if (pgqs_resolve_oids)
 				{
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
@@ -1436,7 +1445,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		if (entry->constvalue)
 		{
 
-			values[i++] = CStringGetTextDatum(strdup(entry->constvalue));
+			values[i++] = CStringGetTextDatum((char *) pg_do_encoding_conversion(
+						(unsigned char *) entry->constvalue,
+						strlen(entry->constvalue),
+						PG_UTF8,
+						GetDatabaseEncoding()));
 		}
 		else
 		{
