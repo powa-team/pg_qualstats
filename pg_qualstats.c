@@ -1378,6 +1378,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	nulls = palloc0(sizeof(bool) * nb_columns);;
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
+		int64 counter;
 		int			i = 0;
 
 		memset(values, 0, sizeof(Datum) * nb_columns);
@@ -1411,7 +1412,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = Int64GetDatumFast(entry->qualid);
+			counter = entry->qualid;
+			values[i++] = Int64GetDatumFast(counter);
 		}
 		if (entry->key.uniquequalid == 0)
 		{
@@ -1419,13 +1421,19 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = Int64GetDatumFast(entry->key.uniquequalid);
+			counter = entry->key.uniquequalid;
+			values[i++] = Int64GetDatumFast(counter);
 		}
-		values[i++] = Int64GetDatumFast(entry->qualnodeid);
-		values[i++] = Int64GetDatumFast(entry->key.uniquequalnodeid);
-		values[i++] = Int64GetDatumFast(entry->occurences);
-		values[i++] = Int64GetDatumFast(entry->count);
-		values[i++] = Int64GetDatumFast(entry->nbfiltered);
+		counter = entry->qualnodeid;
+		values[i++] = Int64GetDatumFast(counter);
+		counter = entry->key.uniquequalnodeid;
+		values[i++] = Int64GetDatumFast(counter);
+		counter = entry->occurences;
+		values[i++] = Int64GetDatumFast(counter);
+		counter = entry->count;
+		values[i++] = Int64GetDatumFast(counter);
+		counter = entry->nbfiltered;
+		values[i++] = Int64GetDatumFast(counter);
 		if (entry->position == -1)
 		{
 			nulls[i++] = true;
@@ -1440,7 +1448,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			values[i++] = Int64GetDatumFast(entry->key.queryid);
+			counter = entry->key.queryid;
+			values[i++] = Int64GetDatumFast(counter);
 		}
 		if (entry->constvalue)
 		{
@@ -1570,11 +1579,12 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS){
 	{
 		Datum	   values[2];
 		bool	   nulls[2];
+		int64 queryid = entry->key.queryid;
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		values[0] = Int64GetDatumFast(entry->key.queryid);
+		values[0] = Int64GetDatumFast(queryid);
 		values[1] = CStringGetTextDatum(entry->querytext);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
