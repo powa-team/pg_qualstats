@@ -1,3 +1,13 @@
+0.0.7:
+  - fix counters for 32 bits builds
+  - handle different collations for constants sampling
+  - add a new "occurences" field, displaying the number of qual call
+  - keep a unnormalized query string for each queryid
+  - fix a bug with operator id retrieval
+  - handles casts
+  - add stats collection for nestedloops
+  - handle FuncExpr and MinMaxExpr
+  - improve performances for queries having multiple quals
 0.0.6:
   - order quals and constants by their text positions.
   - fix bug with Index-Only Scans, which where not correctly supported
