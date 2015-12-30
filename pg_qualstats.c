@@ -100,6 +100,7 @@ static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
+static double pgqs_sample_ratio;
 
 
 /*---- Data structures declarations ----*/
@@ -297,6 +298,18 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+	DefineCustomRealVariable("pg_qualstats.sample_ratio",
+							 "Sampling ratio. 1 means every query, 0.2 means 1 in five queries",
+							 NULL,
+							 &pgqs_sample_ratio,
+							 1,
+							 0,
+							 1,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	parse_int(GetConfigOption("track_activity_query_size", false, false),
 			&pgqs_query_size, 0, NULL);
@@ -405,7 +418,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled)
+	if (pgqs_enabled && rand() <= RAND_MAX * pgqs_sample_ratio)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
