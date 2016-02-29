@@ -418,7 +418,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled && rand() <= RAND_MAX * pgqs_sample_ratio)
+	if (pgqs_enabled && random() <= MAX_RANDOM_VALUE * pgqs_sample_ratio)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
