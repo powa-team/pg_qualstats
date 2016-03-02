@@ -217,6 +217,8 @@ static void pgqs_entry_dealloc(void);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
+static bool pgqs_should_sample();
+
 static Size pgqs_memsize(void);
 
 
@@ -302,7 +304,7 @@ _PG_init(void)
 							 "Sampling ratio. 1 means every query, 0.2 means 1 in five queries",
 							 NULL,
 							 &pgqs_sample_ratio,
-							 1,
+							 -1,
 							 0,
 							 1,
 							 PGC_USERSET,
@@ -324,6 +326,17 @@ _PG_fini(void)
 	shmem_startup_hook = prev_shmem_startup_hook;
 	ExecutorStart_hook = prev_ExecutorStart;
 	ExecutorEnd_hook = prev_ExecutorEnd;
+}
+
+static bool pgqs_should_sample() {
+	double sample_ratio = pgqs_sample_ratio;
+	int max_connections;
+	if(sample_ratio == -1){
+		parse_int(GetConfigOption("max_connections", false, false),
+			&max_connections, 0, NULL);
+		sample_ratio = (1. / max_connections);
+	}
+	return pgqs_enabled && random() <= (MAX_RANDOM_VALUE * sample_ratio);
 }
 
 /*
@@ -418,7 +431,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled && random() <= MAX_RANDOM_VALUE * pgqs_sample_ratio)
+	if (pgqs_should_sample())
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
