@@ -1,3 +1,5 @@
+0.0.8:
+  - add sample_ratio parameter
 0.0.7:
   - fix counters for 32 bits builds
   - handle different collations for constants sampling
