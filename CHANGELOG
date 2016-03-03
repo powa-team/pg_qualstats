@@ -1,3 +1,6 @@
+0.0.9:
+  - add sample_ratio hook
+  - fix mistake while releasing 0.0.8
 0.0.8:
   - add sample_ratio parameter
 0.0.7:
