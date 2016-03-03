@@ -101,6 +101,11 @@ static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
 static double pgqs_sample_ratio;
+static bool pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource source);
+
+
+/* Set at postmaster starting time */
+static int max_connections = 0;
 
 
 /*---- Data structures declarations ----*/
@@ -217,8 +222,6 @@ static void pgqs_entry_dealloc(void);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
-static bool pgqs_should_sample();
-
 static Size pgqs_memsize(void);
 
 
@@ -229,6 +232,7 @@ static pgqsSharedState *pgqs = NULL;
 
 /* Local Hash */
 static HTAB *pgqs_localhash = NULL;
+
 
 
 void
@@ -246,6 +250,8 @@ _PG_init(void)
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
+	parse_int(GetConfigOption("max_connections", false, false),
+			&max_connections, 0, NULL);
 	DefineCustomBoolVariable("pg_qualstats.enabled",
 							 "Enable / Disable pg_qualstats",
 							 NULL,
@@ -305,11 +311,11 @@ _PG_init(void)
 							 NULL,
 							 &pgqs_sample_ratio,
 							 -1,
-							 0,
+							 -1,
 							 1,
 							 PGC_USERSET,
 							 0,
-							 NULL,
+							 pgqs_assign_sample_ratio_check_hook,
 							 NULL,
 							 NULL);
 
@@ -328,15 +334,19 @@ _PG_fini(void)
 	ExecutorEnd_hook = prev_ExecutorEnd;
 }
 
-static bool pgqs_should_sample() {
-	double sample_ratio = pgqs_sample_ratio;
-	int max_connections;
-	if(sample_ratio == -1){
-		parse_int(GetConfigOption("max_connections", false, false),
-			&max_connections, 0, NULL);
-		sample_ratio = (1. / max_connections);
-	}
-	return pgqs_enabled && random() <= (MAX_RANDOM_VALUE * sample_ratio);
+
+/*
+ * Check that the sample ratio is in the correct interval
+ */
+static bool
+pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource source)
+{
+	double val = *newval;
+	if((val < 0 && val != -1) || (val > 1))
+		return false;
+	if(val == -1)
+		*newval = 1. / max_connections;
+	return true;
 }
 
 /*
@@ -431,7 +441,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_should_sample())
+	if (pgqs_enabled && random() <= (MAX_RANDOM_VALUE * pgqs_sample_ratio))
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
@@ -1849,3 +1859,6 @@ static uint32 pgqs_uint32_hashfn(const void *key, Size keysize){
 	return ((pgqsQueryStringHashKey*)key)->queryid;
 }
 # endif
+
+
+
