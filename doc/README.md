@@ -4,7 +4,10 @@ pg_qualstats
 pg_qualstats is a PostgreSQL extension keeping statistics on predicates found
 in ```WHERE``` statements and ```JOIN``` clauses.
 
-Most of the code is a blatant rip-off of pg_stat_statements.
+This is useful if you want to be able to analyze what are the most-often executed quals (predicates) on your database. The [powa](http://powa.readthedocs.org/) project makes use of this to provide index suggestions.
+
+It also allows you to identify correlated columns, by identifying which columns are most frequently queried together.
+
 
 The extension works by looking for known patterns in queries. Currently, this
 includes:
