@@ -323,7 +323,11 @@ _PG_init(void)
 	parse_int(GetConfigOption("track_activity_query_size", false, false),
 			&pgqs_query_size, 0, NULL);
 	RequestAddinShmemSpace(pgqs_memsize());
+#if PG_VERSION_NUM >= 90600
+	RequestNamedLWLockTranche("pg_qualstats", 2);
+#else
 	RequestAddinLWLocks(2);
+#endif
 }
 
 void
@@ -1305,8 +1309,14 @@ pgqs_shmem_startup(void)
 	if (!found)
 	{
 		/* First time through ... */
+#if PG_VERSION_NUM >= 90600
+		LWLockPadded *locks = GetNamedLWLockTranche("pg_qualstats");
+		pgqs->lock = &(locks[0]).lock;
+		pgqs->querylock = &(locks[1]).lock;
+#else
 		pgqs->lock = LWLockAssign();
 		pgqs->querylock = LWLockAssign();
+#endif
 	}
 # if PG_VERSION_NUM < 90500
 	queryinfo.hash = pgqs_uint32_hashfn;
