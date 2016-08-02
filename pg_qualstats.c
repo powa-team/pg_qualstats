@@ -520,7 +520,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		/* retrieve quals informations, main work starts from here */
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 
-		/* store en shared memory found quals, if any */
+		/* if any quals found, store them in shared memory */
 		LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 
 		while (hash_get_num_entries(pgqs_hash) +
