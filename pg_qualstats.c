@@ -183,7 +183,10 @@ typedef struct pgqsQueryStringEntry
 	char querytext[1];
 } pgqsQueryStringEntry;
 
-
+/*
+ * Transient state of the query tree walker - for the meaning of the counters,
+ * see pgqsEntry comments.
+ */
 typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
@@ -197,7 +200,7 @@ typedef struct pgqsWalkerContext
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
 	int64		nbfiltered;
-	int			nentries;
+	int			nentries;		/* number of entries found so far */
 	char		evaltype;
 	const char *      querytext;
 }	pgqsWalkerContext;
