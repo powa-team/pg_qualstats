@@ -253,6 +253,7 @@ _PG_init(void)
 	shmem_startup_hook = pgqs_shmem_startup;
 	parse_int(GetConfigOption("max_connections", false, false),
 			&max_connections, 0, NULL);
+
 	DefineCustomBoolVariable("pg_qualstats.enabled",
 							 "Enable / Disable pg_qualstats",
 							 NULL,
@@ -263,6 +264,7 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+
 	DefineCustomBoolVariable("pg_qualstats.track_constants",
 						  "Enable / Disable pg_qualstats constants tracking",
 							 NULL,
@@ -286,6 +288,7 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
 	DefineCustomBoolVariable("pg_qualstats.resolve_oids",
 					  "Store names alongside the oid. Eats MUCH more space!",
 							 NULL,
@@ -307,6 +310,7 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+
 	DefineCustomRealVariable("pg_qualstats.sample_ratio",
 							 "Sampling ratio. 1 means every query, 0.2 means 1 in five queries",
 							 NULL,
