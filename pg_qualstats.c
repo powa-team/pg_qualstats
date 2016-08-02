@@ -197,6 +197,7 @@ typedef struct pgqsWalkerContext
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
 	int64		nbfiltered;
+	int			nentries;
 	char		evaltype;
 	const char *      querytext;
 }	pgqsWalkerContext;
@@ -459,6 +460,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		context->uniquequalid = 0;
 		context->nbfiltered = 0;
 		context->evaltype = 0;
+		context->nentries = 0;
 		context->querytext = queryDesc->sourceText;
 		queryKey.queryid = context->queryId;
 
@@ -521,38 +523,41 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		pgqs_collectNodeStats(queryDesc->planstate, NIL, context);
 
 		/* if any quals found, store them in shared memory */
-		LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
-
-		while (hash_get_num_entries(pgqs_hash) +
-				hash_get_num_entries(pgqs_localhash) >= pgqs_max)
-			pgqs_entry_dealloc();
-
-		hash_seq_init(&local_hash_seq, pgqs_localhash);
-		while ((localentry = hash_seq_search(&local_hash_seq)) != NULL)
+		if (context->nentries)
 		{
-			newEntry = (pgqsEntry *) hash_search(pgqs_hash, &localentry->key,
-					HASH_ENTER, &found);
+			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 
-			if (!found)
+			while (hash_get_num_entries(pgqs_hash) +
+					hash_get_num_entries(pgqs_localhash) >= pgqs_max)
+				pgqs_entry_dealloc();
+
+			hash_seq_init(&local_hash_seq, pgqs_localhash);
+			while ((localentry = hash_seq_search(&local_hash_seq)) != NULL)
 			{
-				/* raw copy the local entry */
-				memcpy(&(newEntry->lrelid), &(localentry->lrelid),
-					sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+				newEntry = (pgqsEntry *) hash_search(pgqs_hash, &localentry->key,
+						HASH_ENTER, &found);
+
+				if (!found)
+				{
+					/* raw copy the local entry */
+					memcpy(&(newEntry->lrelid), &(localentry->lrelid),
+						sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+				}
+				else
+				{
+					/* only update counters value */
+					newEntry->count += localentry->count;
+					newEntry->nbfiltered += localentry->nbfiltered;
+					newEntry->position += localentry->position;
+					newEntry->usage += localentry->usage;
+					newEntry->occurences += localentry->occurences;
+				}
+				/* cleanup local hash */
+				hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
 			}
-			else
-			{
-				/* only update counters value */
-				newEntry->count += localentry->count;
-				newEntry->nbfiltered += localentry->nbfiltered;
-				newEntry->position += localentry->position;
-				newEntry->usage += localentry->usage;
-				newEntry->occurences += localentry->occurences;
-			}
-			/* cleanup local hash */
-			hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
+
+			LWLockRelease(pgqs->lock);
 		}
-
-		LWLockRelease(pgqs->lock);
 	}
 
 	if (prev_ExecutorEnd)
@@ -905,6 +910,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER, &found);
 	if (!found)
 	{
+		context->nentries++;
+
 		entry->count = 0;
 		entry->nbfiltered = 0;
 		entry->usage = 0;
@@ -1190,6 +1197,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 					&found);
 			if (!found)
 			{
+				context->nentries++;
+
 				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
 				entry->count = 0;
 				entry->nbfiltered = 0;
