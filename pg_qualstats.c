@@ -101,8 +101,8 @@ static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
-static double pgqs_sample_ratio;
-static bool pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource source);
+static double pgqs_sample_rate;
+static bool pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source);
 
 
 /*---- Data structures declarations ----*/
@@ -305,16 +305,16 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomRealVariable("pg_qualstats.sample_ratio",
-							 "Sampling ratio. 1 means every query, 0.2 means 1 in five queries",
+	DefineCustomRealVariable("pg_qualstats.sample_rate",
+							 "Sampling rate. 1 means every query, 0.2 means 1 in five queries",
 							 NULL,
-							 &pgqs_sample_ratio,
+							 &pgqs_sample_rate,
 							 -1,
 							 -1,
 							 1,
 							 PGC_USERSET,
 							 0,
-							 pgqs_assign_sample_ratio_check_hook,
+							 pgqs_assign_sample_rate_check_hook,
 							 NULL,
 							 NULL);
 
@@ -342,7 +342,7 @@ _PG_fini(void)
  * Check that the sample ratio is in the correct interval
  */
 static bool
-pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource source)
+pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source)
 {
 	double val = *newval;
 	if((val < 0 && val != -1) || (val > 1))
@@ -444,7 +444,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled && random() <= (MAX_RANDOM_VALUE * pgqs_sample_ratio))
+	if (pgqs_enabled && random() <= (MAX_RANDOM_VALUE * pgqs_sample_rate))
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;

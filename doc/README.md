@@ -55,7 +55,7 @@ The following GUCs can be configured, in postgresql.conf:
   connection to the database where the query was executed won't be necessary,
   but it will eat much more space (616 bytes per entry instead of 168).
   Additionnaly, this will require some catalog lookups, which aren't free.
-- pg_qualstats.sample_ratio (double, default -1): the ratio of queries that
+- pg_qualstats.sample_rate (double, default -1): the fraction of queries that
   should be sampled. For example, 0.1 means that only one out of ten queries
   will be sampled. The default (-1) means automatic, and results in a value of 1
   / max_connections, so that statiscally, concurrency issues will be rare.
