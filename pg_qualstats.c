@@ -105,10 +105,6 @@ static double pgqs_sample_ratio;
 static bool pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource source);
 
 
-/* Set at postmaster starting time */
-static int max_connections = 0;
-
-
 /*---- Data structures declarations ----*/
 typedef struct pgqsSharedState
 {
@@ -251,8 +247,6 @@ _PG_init(void)
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgqs_shmem_startup;
-	parse_int(GetConfigOption("max_connections", false, false),
-			&max_connections, 0, NULL);
 
 	DefineCustomBoolVariable("pg_qualstats.enabled",
 							 "Enable / Disable pg_qualstats",
@@ -354,7 +348,7 @@ pgqs_assign_sample_ratio_check_hook(double * newval, void **extra, GucSource sou
 	if((val < 0 && val != -1) || (val > 1))
 		return false;
 	if(val == -1)
-		*newval = 1. / max_connections;
+		*newval = 1. / MaxConnections;
 	return true;
 }
 
