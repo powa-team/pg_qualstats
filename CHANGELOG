@@ -1,3 +1,14 @@
+1.0.0:
+  Incompatibilites:
+    - RenameGUC from sample_ratio to sample_rate
+  Bugfix:
+    - only get the exclusive lock on shared memory when needed
+    - Fix bugs related to outer var resolution
+    - Add missing function prototype
+  Miscellaneous:
+    - Add 9.6 compatibility
+    - Code and comment cleanup
+  Thanks to Thomas Vondra and Julien Rouhaud !
 0.0.9:
   - add sample_ratio hook
   - fix mistake while releasing 0.0.8
