@@ -1158,7 +1158,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		if (var != NULL)
 		{
 			pgqsEntry  *entry;
-
+			/* If we don't track rels in the pg_catalog schema,
+			 * lookup the schema to make sure its not pg_catalog. Otherwise,
+			 * bail out.
+			 */
 			if (!pgqs_track_pgcatalog)
 			{
 				HeapTuple	tp;
