@@ -1219,9 +1219,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				{
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
 				}
-				while (hash_get_num_entries(pgqs_hash) >= pgqs_max)
-					pgqs_entry_dealloc();
 			}
+
 			entry->nbfiltered += context->nbfiltered;
 			entry->count += context->count;
 			entry->usage += 1;
