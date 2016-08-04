@@ -38,6 +38,7 @@
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
@@ -191,6 +192,7 @@ typedef struct pgqsWalkerContext
 {
 	uint32		queryId;
 	List	   *rtable;
+	PlanState  *planstate;
 	PlanState  *inner_planstate;
 	PlanState  *outer_planstate;
 	List	   *outer_tlist;
@@ -666,6 +668,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *parent = 0;
 	List	   *indexquals = 0;
 	List	   *quals = 0;
+	context->planstate = planstate;
 
 	switch (nodeTag(plan))
 	{
@@ -1676,6 +1679,9 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context)
 	context->outer_tlist = NIL;
 	context->inner_tlist = NIL;
 	context->index_tlist = NIL;
+	context->outer_planstate = NULL;
+	context->inner_planstate = NULL;
+	context->planstate = planstate;
 	if (IsA(planstate, AppendState))
 		context->outer_planstate = ((AppendState *) planstate)->appendplans[0];
 	else if (IsA(planstate, MergeAppendState))
@@ -1712,46 +1718,45 @@ static Expr *
 pgqs_resolve_var(Var *var, pgqsWalkerContext * context)
 {
 	List	   *tlist = NULL;
-	Expr	   *newvar = (Expr *) var;
-	PlanState  *outer_planstate = context->outer_planstate;
-	PlanState  *inner_planstate = context->inner_planstate;
-	List	   *outer_tlist = context->outer_tlist;
-	List	   *inner_tlist = context->inner_tlist;
-	List	   *index_tlist = context->index_tlist;
-
+	PlanState  *planstate = context->planstate;
+	pgqs_set_planstates(context->planstate, context);
 	switch (var->varno)
 	{
 		case INNER_VAR:
 			tlist = context->inner_tlist;
-			pgqs_set_planstates(inner_planstate, context);
 			break;
 		case OUTER_VAR:
 			tlist = context->outer_tlist;
-			pgqs_set_planstates(outer_planstate, context);
 			break;
 		case INDEX_VAR:
 			tlist = context->index_tlist;
 			break;
 		default:
-			break;
+			return (Expr*) var;
 	}
 	if (tlist != NULL)
 	{
 		TargetEntry *entry = get_tle_by_resno(tlist, var->varattno);
-
-		newvar = entry->expr;
-		while (((Expr *) var != newvar) && IsA(newvar, Var))
-		{
-			var = (Var *) newvar;
-			newvar = pgqs_resolve_var((Var *) var, context);
+		if(entry != NULL){
+			Var * newvar = (Var *) (entry->expr);
+			if(var->varno == OUTER_VAR){
+				pgqs_set_planstates(context->outer_planstate, context);
+			}
+			if(var->varno == INNER_VAR){
+				pgqs_set_planstates(context->inner_planstate, context);
+			}
+			var = (Var *) pgqs_resolve_var(newvar, context);
 		}
 	}
-	context->outer_planstate = outer_planstate;
-	context->inner_planstate = inner_planstate;
-	context->outer_tlist = outer_tlist;
-	context->inner_tlist = inner_tlist;
-	context->index_tlist = index_tlist;
-	return newvar;
+	Assert(!(IsA(var, Var) && IS_SPECIAL_VARNO(var->varno)));
+	/* If the result is something OTHER than a var, replace it by a constexpr */
+	if(!IsA(var, Var)){
+		Const * consttext;
+		consttext = (Const*) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, true);
+		var = (Var *) consttext;
+	}
+	pgqs_set_planstates(planstate, context);
+	return (Expr*) var;
 }
 
 /*
