@@ -61,6 +61,9 @@ PG_MODULE_MAGIC;
 #define PGQS_NAME_COLUMNS 7 /* number of column added when using
 							   pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
+#define PGQS_MAX_LOCAL_ENTRIES	(pgqs_max * 0.2)	/* do not track more of 20%
+													   of possible entries in
+													   shared mem */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
 /*---- Function declarations ----*/
@@ -223,6 +226,7 @@ static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext * context);
 
 static void pgqs_entry_dealloc(void);
 static void pgqs_queryentry_dealloc(void);
+static void pgqs_localentry_dealloc(int nvictims);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
 static Size pgqs_memsize(void);
@@ -530,6 +534,19 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		/* if any quals found, store them in shared memory */
 		if (context->nentries)
 		{
+			/*
+			 * Before acquiring exlusive lwlock, check if there's enough room to
+			 * store local hash.  Also, do not remove more than 20% of maximum
+			 * number of entries in shared memory (wether they are used or not).
+			 * This should not happen since we shouldn't store that much entries
+			 * in localhash in the first place.
+			 */
+			int nvictims = hash_get_num_entries(pgqs_localhash) -
+							PGQS_MAX_LOCAL_ENTRIES;
+
+			if (nvictims > 0)
+				pgqs_localentry_dealloc(nvictims);
+
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 
 			while (hash_get_num_entries(pgqs_hash) +
@@ -655,6 +672,42 @@ pgqs_queryentry_dealloc(void)
 		hash_search_with_hash_value(pgqs_query_examples_hash, &entry->key, ((pgqsQueryStringHashKey) entry->key).queryid, HASH_REMOVE, NULL);
 
 	hash_seq_term(&hash_seq);
+}
+
+/*
+ * Remove the requested number of entries from pgqs_localhash */
+static void
+pgqs_localentry_dealloc(int nvictims)
+{
+	pgqsEntry  *localentry;
+	HASH_SEQ_STATUS local_hash_seq;
+	pgqsHashKey *victims[nvictims];
+	bool need_seq_term = true;
+	int i, ptr = 0;
+
+	if (nvictims <= 0)
+		return;
+
+	hash_seq_init(&local_hash_seq, pgqs_localhash);
+	while (nvictims-- >= 0)
+	{
+		localentry = hash_seq_search(&local_hash_seq);
+
+		/* check if caller required too many victims */
+		if (!localentry)
+		{
+			need_seq_term = false;
+			break;
+		}
+
+		victims[ptr++] = &localentry->key;
+	}
+
+	if (need_seq_term)
+		hash_seq_term(&local_hash_seq);
+
+	for (i=0; i<ptr; i++)
+		hash_search(pgqs_localhash, victims[i], HASH_REMOVE, NULL);
 }
 
 static void
@@ -865,6 +918,10 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 	Oid			opoid;
 	RangeTblEntry *rte;
 
+	/* do not store more than 20% of possible entries in shared mem */
+	if (context->nentries >= PGQS_MAX_LOCAL_ENTRIES)
+		return NULL;
+
 	if (IsA(expr->arg, Var))
 	{
 		newexpr = pgqs_resolve_var((Var *) expr->arg, context);
@@ -1058,6 +1115,10 @@ get_const_expr(Const *constval, StringInfo buf)
 static pgqsEntry *
 pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 {
+	/* do not store more than 20% of possible entries in shared mem */
+	if (context->nentries >= PGQS_MAX_LOCAL_ENTRIES)
+		return NULL;
+
 	if (list_length(expr->args) == 2)
 	{
 		Node	   *node = linitial(expr->args);
