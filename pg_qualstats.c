@@ -47,6 +47,9 @@
 #include "parser/parsetree.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
+#if PG_VERSION_NUM >= 100000
+#include "storage/shmem.h"
+#endif
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
