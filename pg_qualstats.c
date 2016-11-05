@@ -726,6 +726,13 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *quals = 0;
 	context->planstate = planstate;
 
+	/*
+	 * We have to forcibly clean up the instrumentation state because we
+	 * haven't done ExecutorEnd yet.  This is pretty grotty ...
+	 */
+	if (planstate->instrument)
+		InstrEndLoop(planstate->instrument);
+
 	switch (nodeTag(plan))
 	{
 		case T_IndexOnlyScan:
