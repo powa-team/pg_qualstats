@@ -27,6 +27,9 @@
 #include "postgres.h"
 #include "access/hash.h"
 #include "access/htup_details.h"
+#if PG_VERSION_NUM >= 90600
+#include "access/parallel.h"
+#endif
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_operator.h"
@@ -45,6 +48,7 @@
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
+#include "postmaster/autovacuum.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #if PG_VERSION_NUM >= 100000
@@ -123,6 +127,10 @@ static double pgqs_sample_rate;
 static int query_is_sampled;/* Is the current query sampled, per backend */
 static int	nesting_level = 0; /* Current nesting depth of ExecutorRun calls */
 static bool pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source);
+#if PG_VERSION_NUM > 90600
+static void pgqs_set_query_sampled(bool sample);
+#endif
+static bool pgqs_is_query_sampled(void);
 
 
 /*---- Data structures declarations ----*/
@@ -134,6 +142,10 @@ typedef struct pgqsSharedState
 #else
 	LWLockId	lock;			/* protects counters hashtable search/modification */
 	LWLockId    querylock;		/* protects query hashtable search/modification */
+#endif
+#if PG_VERSION_NUM >= 90600
+	LWLock     *sampledlock;		/* protects sampled array search/modification */
+	bool		sampled[FLEXIBLE_ARRAY_MEMBER];	/* should we sample this query? */
 #endif
 }	pgqsSharedState;
 
@@ -246,6 +258,9 @@ static void pgqs_localentry_dealloc(int nvictims);
 static void pgqs_fillnames(pgqsEntryWithNames * entry);
 
 static Size pgqs_memsize(void);
+#if PG_VERSION_NUM >= 90600
+static Size pgqs_sampled_array_size(void);
+#endif
 
 
 /* Global Hash */
@@ -352,7 +367,7 @@ _PG_init(void)
 			&pgqs_query_size, 0, NULL);
 	RequestAddinShmemSpace(pgqs_memsize());
 #if PG_VERSION_NUM >= 90600
-	RequestNamedLWLockTranche("pg_qualstats", 2);
+	RequestNamedLWLockTranche("pg_qualstats", 3);
 #else
 	RequestAddinLWLocks(2);
 #endif
@@ -382,6 +397,41 @@ pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource sour
 	if(val == -1)
 		*newval = 1. / MaxConnections;
 	return true;
+}
+
+#if PG_VERSION_NUM >= 90600
+static void
+pgqs_set_query_sampled(bool sample)
+{
+	/* the decisions should only be made in leader */
+	Assert(! IsParallelWorker());
+
+	/* in worker processes we need to get the info from shared memory */
+	LWLockAcquire(pgqs->sampledlock, LW_EXCLUSIVE);
+	pgqs->sampled[MyBackendId] = sample;
+	LWLockRelease(pgqs->sampledlock);
+}
+#endif
+
+static bool
+pgqs_is_query_sampled(void)
+{
+#if PG_VERSION_NUM >= 90600
+	bool sampled;
+
+	/* in leader we can just check the global variable */
+	if (! IsParallelWorker())
+		return query_is_sampled;
+
+	/* in worker processes we need to get the info from shared memory */
+	LWLockAcquire(pgqs->sampledlock, LW_SHARED);
+	sampled = pgqs->sampled[ParallelMasterBackendId];
+	LWLockRelease(pgqs->sampledlock);
+
+	return sampled;
+#else
+	return query_is_sampled;
+#endif
 }
 
 /*
@@ -459,11 +509,20 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		 * For rate sampling, randomly choose top-level statement. Either all
 		 * nested statements will be explained or none will.
 		 */
-		if (nesting_level == 0)
+		if (nesting_level == 0
+#if PG_VERSION_NUM >= 90600
+				&& (! IsParallelWorker())
+#endif
+				)
+		{
 			query_is_sampled = (random() <= (MAX_RANDOM_VALUE *
 									 pgqs_sample_rate));
+#if PG_VERSION_NUM >= 90600
+			pgqs_set_query_sampled(query_is_sampled);
+#endif
+		}
 
-		if (query_is_sampled)
+		if (pgqs_is_query_sampled())
 		{
 			queryDesc->instrument_options |= INSTRUMENT_ROWS;
 			queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
@@ -540,7 +599,11 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled && query_is_sampled)
+	if (pgqs_enabled && pgqs_is_query_sampled()
+#if PG_VERSION_NUM >= 90600
+			&& (! IsParallelWorker())
+#endif
+			)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
@@ -1482,8 +1545,12 @@ pgqs_shmem_startup(void)
 		/* First time through ... */
 #if PG_VERSION_NUM >= 90600
 		LWLockPadded *locks = GetNamedLWLockTranche("pg_qualstats");
+
 		pgqs->lock = &(locks[0]).lock;
 		pgqs->querylock = &(locks[1]).lock;
+		pgqs->sampledlock = &(locks[2]).lock;
+		/* mark all backends as not sampled */
+		memset(pgqs->sampled, 0, pgqs_sampled_array_size());
 #else
 		pgqs->lock = LWLockAssign();
 		pgqs->querylock = LWLockAssign();
@@ -1944,8 +2011,27 @@ pgqs_memsize(void)
 		size = add_size(size, hash_estimate_size(pgqs_max,
 				sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char)));
 	}
+#if PG_VERSION_NUM >= 90600
+	size = add_size(size, pgqs_sampled_array_size());
+#endif
 	return size;
 }
+
+#if PG_VERSION_NUM >= 90600
+static Size
+pgqs_sampled_array_size(void)
+{
+	 /*
+	 * Parallel workers need to be sampled if their original query is also
+	 * sampled.  We store in shared mem the sample state for each query,
+	 * identified by their BackendId.  If need room fo all backend, plus
+	 * aotovacuum launcher and workers, plus bg workers and an extra one since
+	 * BackendId numerotation starts at 1
+	 */
+	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
+				+ max_worker_processes + 1));
+}
+#endif
 
 static uint32
 hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const)
