@@ -1055,6 +1055,7 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 			/* Bail out */
 			return NULL;
 	}
+	memset(&key, 0, sizeof(pgqsHashKey));
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
 	key.uniquequalid = context->uniquequalid;
@@ -1232,6 +1233,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		tempentry.rattnum = InvalidAttrNumber;
 		tempentry.rrelid = InvalidOid;
 
+		memset(&key, 0, sizeof(pgqsHashKey));
 		key.userid = GetUserId();
 		key.dbid = MyDatabaseId;
 		key.uniquequalid = context->uniquequalid;
