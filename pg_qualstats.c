@@ -90,9 +90,20 @@ PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static void pgqs_ExecutorRun(QueryDesc *queryDesc,
+					ScanDirection direction,
+#if PG_VERSION_NUM >= 90600
+					uint64 count
+#else
+					long count
+#endif
+		);
+static void pgqs_ExecutorFinish(QueryDesc *queryDesc);
 static void pgqs_ExecutorEnd(QueryDesc *queryDesc);
 
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
+static ExecutorRun_hook_type prev_ExecutorRun = NULL;
+static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
@@ -109,6 +120,8 @@ static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
 static double pgqs_sample_rate;
+static int query_is_sampled;/* Is the current query sampled, per backend */
+static int	nesting_level = 0; /* Current nesting depth of ExecutorRun calls */
 static bool pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source);
 
 
@@ -256,6 +269,10 @@ _PG_init(void)
 
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = pgqs_ExecutorStart;
+	prev_ExecutorRun = ExecutorRun_hook;
+	ExecutorRun_hook = pgqs_ExecutorRun;
+	prev_ExecutorFinish = ExecutorFinish_hook;
+	ExecutorFinish_hook = pgqs_ExecutorFinish;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
 	prev_shmem_startup_hook = shmem_startup_hook;
@@ -347,6 +364,8 @@ _PG_fini(void)
 	/* Uninstall hooks. */
 	shmem_startup_hook = prev_shmem_startup_hook;
 	ExecutorStart_hook = prev_ExecutorStart;
+	ExecutorRun_hook = prev_ExecutorRun;
+	ExecutorFinish_hook = prev_ExecutorFinish;
 	ExecutorEnd_hook = prev_ExecutorEnd;
 }
 
@@ -436,14 +455,78 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	/* Setup instrumentation */
 	if (pgqs_enabled)
 	{
-		queryDesc->instrument_options |= INSTRUMENT_ROWS;
-		queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
+		/*
+		 * For rate sampling, randomly choose top-level statement. Either all
+		 * nested statements will be explained or none will.
+		 */
+		if (nesting_level == 0)
+			query_is_sampled = (random() <= (MAX_RANDOM_VALUE *
+									 pgqs_sample_rate));
+
+		if (query_is_sampled)
+		{
+			queryDesc->instrument_options |= INSTRUMENT_ROWS;
+			queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
+		}
 	}
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
 	else
 		standard_ExecutorStart(queryDesc, eflags);
 
+}
+
+/*
+ * ExecutorRun hook: all we need do is track nesting depth
+ */
+static void
+pgqs_ExecutorRun(QueryDesc *queryDesc,
+					ScanDirection direction,
+#if PG_VERSION_NUM >= 90600
+					uint64 count
+#else
+					long count
+#endif
+		)
+{
+	nesting_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorRun)
+			prev_ExecutorRun(queryDesc, direction, count);
+		else
+			standard_ExecutorRun(queryDesc, direction, count);
+		nesting_level--;
+	}
+	PG_CATCH();
+	{
+		nesting_level--;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+}
+
+/*
+ * ExecutorFinish hook: all we need do is track nesting depth
+ */
+static void
+pgqs_ExecutorFinish(QueryDesc *queryDesc)
+{
+	nesting_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorFinish)
+			prev_ExecutorFinish(queryDesc);
+		else
+			standard_ExecutorFinish(queryDesc);
+		nesting_level--;
+	}
+	PG_CATCH();
+	{
+		nesting_level--;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 }
 
 /*
@@ -457,7 +540,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry * queryEntry;
 	bool found;
 
-	if (pgqs_enabled && random() <= (MAX_RANDOM_VALUE * pgqs_sample_rate))
+	if (pgqs_enabled && query_is_sampled)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
