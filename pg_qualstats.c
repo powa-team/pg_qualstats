@@ -1978,7 +1978,7 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext * context)
 	/* If the result is something OTHER than a var, replace it by a constexpr */
 	if(!IsA(var, Var)){
 		Const * consttext;
-		consttext = (Const*) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, true);
+		consttext = (Const*) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, false);
 		var = (Var *) consttext;
 	}
 	pgqs_set_planstates(planstate, context);
