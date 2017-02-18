@@ -1663,7 +1663,6 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	nulls = palloc0(sizeof(bool) * nb_columns);;
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		int64 counter;
 		int			i = 0;
 
 		memset(values, 0, sizeof(Datum) * nb_columns);
@@ -1697,8 +1696,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			counter = entry->qualid;
-			values[i++] = Int64GetDatumFast(counter);
+			values[i++] = Int64GetDatum(entry->qualid);
 		}
 		if (entry->key.uniquequalid == 0)
 		{
@@ -1706,19 +1704,15 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			counter = entry->key.uniquequalid;
-			values[i++] = Int64GetDatumFast(counter);
+			values[i++] = Int64GetDatum(entry->key.uniquequalid);
 		}
-		counter = entry->qualnodeid;
-		values[i++] = Int64GetDatumFast(counter);
-		counter = entry->key.uniquequalnodeid;
-		values[i++] = Int64GetDatumFast(counter);
-		counter = entry->occurences;
-		values[i++] = Int64GetDatumFast(counter);
-		counter = entry->count;
-		values[i++] = Int64GetDatumFast(counter);
-		counter = entry->nbfiltered;
-		values[i++] = Int64GetDatumFast(counter);
+
+		values[i++] = Int64GetDatum(entry->qualnodeid);
+		values[i++] = Int64GetDatum(entry->key.uniquequalnodeid);
+		values[i++] = Int64GetDatum(entry->occurences);
+		values[i++] = Int64GetDatum(entry->count);
+		values[i++] = Int64GetDatum(entry->nbfiltered);
+
 		if (entry->position == -1)
 		{
 			nulls[i++] = true;
@@ -1733,8 +1727,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		}
 		else
 		{
-			counter = entry->key.queryid;
-			values[i++] = Int64GetDatumFast(counter);
+			values[i++] = Int64GetDatum(entry->key.queryid);
 		}
 		if (entry->constvalue)
 		{
