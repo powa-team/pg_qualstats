@@ -1659,6 +1659,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		nb_columns += PGQS_NAME_COLUMNS;
 	}
 
+	Assert(nb_columns == tupdesc->natts);
+
 	values = palloc0(sizeof(Datum) * nb_columns);
 	nulls = palloc0(sizeof(bool) * nb_columns);;
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
