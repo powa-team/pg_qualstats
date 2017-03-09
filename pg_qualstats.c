@@ -1420,6 +1420,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				position = constant->location;
 			}
 
+			if (var != NULL) {
+				position = var->location;
+			}
+			
 			/* local hash, no lock needed */
 			entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER,
 					&found);
