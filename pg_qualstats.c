@@ -719,7 +719,6 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					/* only update counters value */
 					newEntry->count += localentry->count;
 					newEntry->nbfiltered += localentry->nbfiltered;
-					newEntry->position += localentry->position;
 					newEntry->usage += localentry->usage;
 					newEntry->occurences += localentry->occurences;
 				}
