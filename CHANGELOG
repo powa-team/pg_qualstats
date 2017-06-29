@@ -1,3 +1,11 @@
+1.0.2:
+  Bugfix
+    - Fix infinite loop for queries having a huge number of WHERE or JOIN
+      clauses
+1.0.1:
+  Bugfix
+    - Fix impossibility to install pg_qualstats if intarray extension is
+      installed
 1.0.0:
   Incompatibilites:
     - RenameGUC from sample_ratio to sample_rate
