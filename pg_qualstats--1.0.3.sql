@@ -223,7 +223,7 @@ CREATE VIEW pg_qualstats_pretty AS
         nl.nspname as left_schema,
         al.attrelid::regclass as left_table,
         al.attname as left_column,
-        opno::regoper as operator,
+        opno::regoper::text as operator,
         nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
