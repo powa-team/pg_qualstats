@@ -1,3 +1,20 @@
+1.0.3:
+  Bugfix:
+    - Fix a missing call to InstrEndLoop (Tomas Vondra)
+    - Sample all nested queries when top level statement is sampled (Julien
+      Rouhaud)
+    - Make sure hash keys can be compared using memcmp (Julien Rouhaud)
+    - Fix behavior with parallel queries (Julien Rouhaud based on a patch by
+      Tomas Vondra)
+    - Fix bug on TEXTCONST not being byval (Ronan Dunklau)
+    - Fix 64bits counters on pass-by-ref float8 architectures (Julien Rouhaud)
+    - Fix bug in pg_qualstats_names (Ronan Dunklau)
+    - Fix bug in const position (Julien Rouhaud)
+    - Fix pg_qualstats_pretty to use text instead of regoper, allowing usage of
+      pg_upgrade when pg_qualstats is installed (Julien Rouhaud)
+  Miscellaneous:
+    - Add pg 10 compatibility (Julien Rouhaud)
+    - Do not install docs anymore (Ronan Dunklau)
 1.0.2:
   Bugfix
     - Fix infinite loop for queries having a huge number of WHERE or JOIN
