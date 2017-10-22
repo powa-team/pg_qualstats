@@ -73,6 +73,8 @@ PG_MODULE_MAGIC;
 													   shared mem */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
+#define PGQS_FLAGS (INSTRUMENT_ROWS|INSTRUMENT_BUFFERS)
+
 /*---- Function declarations ----*/
 
 void		_PG_init(void);
@@ -526,10 +528,7 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		}
 
 		if (pgqs_is_query_sampled())
-		{
-			queryDesc->instrument_options |= INSTRUMENT_ROWS;
-			queryDesc->instrument_options |= INSTRUMENT_BUFFERS;
-		}
+			queryDesc->instrument_options |= PGQS_FLAGS;
 	}
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
@@ -617,7 +616,18 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 #if PG_VERSION_NUM >= 90600
 			&& (! IsParallelWorker())
 #endif
-			)
+			/*
+			 * multiple ExecutorStart/ExecutorEnd can be interleaved, so when
+			 * sampling is activated there's no guarantee that
+			 * pgqs_is_query_sampled() will only detect queries that were
+			 * actually sampled (thus having the required instrumentation set
+			 * up).  To avoid such cases, we double check that we have the
+			 * required instrumentation set up.  That won't exactly detect
+			 * the sampled queries, but that should be close enough and avoid
+			 * adding to much complexity.
+			 */
+			&& (queryDesc->instrument_options & PGQS_FLAGS) == PGQS_FLAGS
+	   )
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
