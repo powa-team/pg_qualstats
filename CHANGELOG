@@ -12,6 +12,8 @@
     - Fix bug in const position (Julien Rouhaud)
     - Fix pg_qualstats_pretty to use text instead of regoper, allowing usage of
       pg_upgrade when pg_qualstats is installed (Julien Rouhaud)
+    - Fix segfault when interleaved executors cause bad sampling detection
+      (Julien Rouhaud, reported by Andreas Seltenreich)
   Miscellaneous:
     - Add pg 10 compatibility (Julien Rouhaud)
     - Do not install docs anymore (Ronan Dunklau)
