@@ -17,6 +17,8 @@
   Miscellaneous:
     - Add pg 10 compatibility (Julien Rouhaud)
     - Do not install docs anymore (Ronan Dunklau)
+    - Add missing occurences/nbfiltered fields to pg_qualstats_pretty and
+      pg_qualstats_all views (Julien Rouhaud)
 1.0.2:
   Bugfix
     - Fix infinite loop for queries having a huge number of WHERE or JOIN
