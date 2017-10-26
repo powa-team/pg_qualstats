@@ -227,6 +227,7 @@ CREATE VIEW pg_qualstats_pretty AS
         nr.nspname as right_schema,
         ar.attrelid::regclass as right_table,
         ar.attname as right_column,
+        sum(occurences) as occurences,
         sum(execution_count) as execution_count,
         sum(nbfiltered) as nbfiltered
   from pg_qualstats qs
