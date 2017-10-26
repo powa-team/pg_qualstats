@@ -80,6 +80,7 @@ The extension defines the following functions:
    - *dbid*: oid of the database in which the query has been executed
    - *lrelid*, *lattnum*: oid of the relation and attribute number of the VAR on
 	 the left hand side, if any
+   - *opno*: oid of the operator used in the expression
    - *rrelid*, *rattnum*: oid of the relation and attribute number of the VAR on
 	 the right hand side, if any
    - *parenthash*: hash of the parent "AND" expression, if any. This is useful
