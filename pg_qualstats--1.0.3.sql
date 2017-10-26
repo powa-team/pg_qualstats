@@ -240,7 +240,9 @@ CREATE VIEW pg_qualstats_pretty AS
 
 
 CREATE OR REPLACE VIEW pg_qualstats_all AS
-  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums, opno, max(qualid) as qualid, sum(execution_count) as execution_count,
+  SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums,
+    opno, max(qualid) as qualid, sum(occurences) as occurences,
+    sum(execution_count) as execution_count, sum(nbfiltered) as nbfiltered,
     coalesce(qualid, qualnodeid) as qualnodeid
   FROM (
     SELECT
@@ -255,7 +257,9 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.opno as opno,
           qs.qualid as qualid,
           qs.qualnodeid as qualnodeid,
+          qs.occurences as occurences,
           qs.execution_count as execution_count,
+          qs.nbfiltered as nbfiltered,
           qs.queryid
     FROM pg_qualstats() qs
     WHERE lrelid IS NOT NULL or rrelid IS NOT NULL
