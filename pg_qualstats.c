@@ -64,13 +64,13 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 18 /* number of columns in pg_qualstats  SRF */
-#define PGQS_NAME_COLUMNS 7 /* number of column added when using
-							   pg_qualstats_column SRF */
+#define PGQS_COLUMNS 18			/* number of columns in pg_qualstats  SRF */
+#define PGQS_NAME_COLUMNS 7		/* number of column added when using
+								 * pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
-#define PGQS_MAX_LOCAL_ENTRIES	(pgqs_max * 0.2)	/* do not track more of 20%
-													   of possible entries in
-													   shared mem */
+#define PGQS_MAX_LOCAL_ENTRIES	(pgqs_max * 0.2)	/* do not track more of
+													 * 20% of possible entries
+													 * in shared mem */
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
 #define PGQS_FLAGS (INSTRUMENT_ROWS|INSTRUMENT_BUFFERS)
@@ -96,17 +96,18 @@ PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
-static void pgqs_ExecutorRun(QueryDesc *queryDesc,
-					ScanDirection direction,
+static void
+pgqs_ExecutorRun(QueryDesc *queryDesc,
+				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
-					uint64 count
+				 uint64 count
 #else
-					long count
+				 long count
 #endif
 #if PG_VERSION_NUM >= 100000
-					,bool execute_once
+				 ,bool execute_once
 #endif
-		);
+);
 static void pgqs_ExecutorFinish(QueryDesc *queryDesc);
 static void pgqs_ExecutorEnd(QueryDesc *queryDesc);
 
@@ -122,16 +123,16 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 static uint32 pgqs_uint32_hashfn(const void *key, Size keysize);
 #endif
 
-static int  pgqs_query_size;
+static int	pgqs_query_size;
 static int	pgqs_max;			/* max # statements to track */
-static bool pgqs_track_pgcatalog;		/* track queries on pg_catalog */
+static bool pgqs_track_pgcatalog;	/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
 static double pgqs_sample_rate;
-static int query_is_sampled;/* Is the current query sampled, per backend */
-static int	nesting_level = 0; /* Current nesting depth of ExecutorRun calls */
-static bool pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source);
+static int	query_is_sampled;	/* Is the current query sampled, per backend */
+static int	nesting_level = 0;	/* Current nesting depth of ExecutorRun calls */
+static bool pgqs_assign_sample_rate_check_hook(double *newval, void **extra, GucSource source);
 #if PG_VERSION_NUM > 90600
 static void pgqs_set_query_sampled(bool sample);
 #endif
@@ -142,29 +143,34 @@ static bool pgqs_is_query_sampled(void);
 typedef struct pgqsSharedState
 {
 #if PG_VERSION_NUM >= 90400
-	LWLock	   *lock;			/* protects counters hashtable search/modification */
-	LWLock     *querylock;		/* protects query hashtable search/modification */
+	LWLock	   *lock;			/* protects counters hashtable
+								 * search/modification */
+	LWLock	   *querylock;		/* protects query hashtable
+								 * search/modification */
 #else
-	LWLockId	lock;			/* protects counters hashtable search/modification */
-	LWLockId    querylock;		/* protects query hashtable search/modification */
+	LWLockId	lock;			/* protects counters hashtable
+								 * search/modification */
+	LWLockId	querylock;		/* protects query hashtable
+								 * search/modification */
 #endif
 #if PG_VERSION_NUM >= 90600
-	LWLock     *sampledlock;		/* protects sampled array search/modification */
-	bool		sampled[FLEXIBLE_ARRAY_MEMBER];	/* should we sample this query? */
+	LWLock	   *sampledlock;	/* protects sampled array search/modification */
+	bool		sampled[FLEXIBLE_ARRAY_MEMBER]; /* should we sample this
+												 * query? */
 #endif
-}	pgqsSharedState;
+} pgqsSharedState;
 
 typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
 	uint32		queryid;		/* query identifier (if set by another plugin */
-	uint32		uniquequalnodeid;		/* Hash of the const */
+	uint32		uniquequalnodeid;	/* Hash of the const */
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
 								 * executed after a scan, or 'i' for an
 								 * indexqual */
-}	pgqsHashKey;
+} pgqsHashKey;
 
 
 typedef struct pgqsNames
@@ -176,7 +182,7 @@ typedef struct pgqsNames
 	NameData	opname;
 	NameData	rrelname;
 	NameData	rattname;
-}	pgqsNames;
+} pgqsNames;
 
 
 typedef struct pgqsEntry
@@ -194,30 +200,33 @@ typedef struct pgqsEntry
 								 * otherwise. */
 	uint32		qualnodeid;		/* Hash of the node itself */
 
-	int64		count; /* # of operator execution */
-	int64		nbfiltered; /* # of lines discarded by the operator */
-	int			position; /* content position in query text */
-	double		usage; /* # of qual execution, used for deallocation */
+	int64		count;			/* # of operator execution */
+	int64		nbfiltered;		/* # of lines discarded by the operator */
+	int			position;		/* content position in query text */
+	double		usage;			/* # of qual execution, used for deallocation */
 	int64		occurences;
-}	pgqsEntry;
+} pgqsEntry;
 
 typedef struct pgqsEntryWithNames
 {
 	pgqsEntry	entry;
 	pgqsNames	names;
-}	pgqsEntryWithNames;
+} pgqsEntryWithNames;
 
-typedef  struct pgqsQueryStringHashKey {
-	uint32 queryid;
+typedef struct pgqsQueryStringHashKey
+{
+	uint32		queryid;
 } pgqsQueryStringHashKey;
 
 typedef struct pgqsQueryStringEntry
 {
 	pgqsQueryStringHashKey key;
-	/* Imperatively at the end of the struct
-	   This is actually of length query_size, which is track_activity_query_size
+
+	/*
+	 * Imperatively at the end of the struct This is actually of length
+	 * query_size, which is track_activity_query_size
 	 */
-	char querytext[1];
+	char		querytext[1];
 } pgqsQueryStringEntry;
 
 /*
@@ -240,27 +249,27 @@ typedef struct pgqsWalkerContext
 	int64		nbfiltered;
 	int			nentries;		/* number of entries found so far */
 	char		evaltype;
-	const char *      querytext;
-}	pgqsWalkerContext;
+	const char *querytext;
+} pgqsWalkerContext;
 
 
-static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * query);
-static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context);
-static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context);
-static pgqsEntry *pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context);
-static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context);
-static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext * context);
-static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context);
-static uint32 hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const);
-static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const);
-static void pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context);
-static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext * context);
+static bool pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *query);
+static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context);
+static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context);
+static pgqsEntry *pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context);
+static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *context);
+static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext *context);
+static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext *context);
+static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context, bool include_const);
+static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include_const);
+static void pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context);
+static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext *context);
 
 
 static void pgqs_entry_dealloc(void);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_localentry_dealloc(int nvictims);
-static void pgqs_fillnames(pgqsEntryWithNames * entry);
+static void pgqs_fillnames(pgqsEntryWithNames *entry);
 
 static Size pgqs_memsize(void);
 #if PG_VERSION_NUM >= 90600
@@ -310,7 +319,7 @@ _PG_init(void)
 							 NULL);
 
 	DefineCustomBoolVariable("pg_qualstats.track_constants",
-						  "Enable / Disable pg_qualstats constants tracking",
+							 "Enable / Disable pg_qualstats constants tracking",
 							 NULL,
 							 &pgqs_track_constants,
 							 true,
@@ -321,7 +330,7 @@ _PG_init(void)
 							 NULL);
 
 	DefineCustomIntVariable("pg_qualstats.max",
-			"Sets the maximum number of statements tracked by pg_qualstats.",
+							"Sets the maximum number of statements tracked by pg_qualstats.",
 							NULL,
 							&pgqs_max,
 							1000,
@@ -334,7 +343,7 @@ _PG_init(void)
 							NULL);
 
 	DefineCustomBoolVariable("pg_qualstats.resolve_oids",
-					  "Store names alongside the oid. Eats MUCH more space!",
+							 "Store names alongside the oid. Eats MUCH more space!",
 							 NULL,
 							 &pgqs_resolve_oids,
 							 false,
@@ -369,7 +378,7 @@ _PG_init(void)
 							 NULL);
 
 	parse_int(GetConfigOption("track_activity_query_size", false, false),
-			&pgqs_query_size, 0, NULL);
+			  &pgqs_query_size, 0, NULL);
 	RequestAddinShmemSpace(pgqs_memsize());
 #if PG_VERSION_NUM >= 90600
 	RequestNamedLWLockTranche("pg_qualstats", 3);
@@ -394,12 +403,13 @@ _PG_fini(void)
  * Check that the sample ratio is in the correct interval
  */
 static bool
-pgqs_assign_sample_rate_check_hook(double * newval, void **extra, GucSource source)
+pgqs_assign_sample_rate_check_hook(double *newval, void **extra, GucSource source)
 {
-	double val = *newval;
-	if((val < 0 && val != -1) || (val > 1))
+	double		val = *newval;
+
+	if ((val < 0 && val != -1) || (val > 1))
 		return false;
-	if(val == -1)
+	if (val == -1)
 		*newval = 1. / MaxConnections;
 	return true;
 }
@@ -409,7 +419,7 @@ static void
 pgqs_set_query_sampled(bool sample)
 {
 	/* the decisions should only be made in leader */
-	Assert(! IsParallelWorker());
+	Assert(!IsParallelWorker());
 
 	/* in worker processes we need to get the info from shared memory */
 	LWLockAcquire(pgqs->sampledlock, LW_EXCLUSIVE);
@@ -422,10 +432,10 @@ static bool
 pgqs_is_query_sampled(void)
 {
 #if PG_VERSION_NUM >= 90600
-	bool sampled;
+	bool		sampled;
 
 	/* in leader we can just check the global variable */
-	if (! IsParallelWorker())
+	if (!IsParallelWorker())
 		return query_is_sampled;
 
 	/* in worker processes we need to get the info from shared memory */
@@ -443,7 +453,7 @@ pgqs_is_query_sampled(void)
  * Do catalog search to replace oids with corresponding objects name
  */
 void
-pgqs_fillnames(pgqsEntryWithNames * entry)
+pgqs_fillnames(pgqsEntryWithNames *entry)
 {
 	HeapTuple	tp;
 
@@ -457,17 +467,15 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 	{
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.lrelid));
 		if (!HeapTupleIsValid(tp))
-		{
 			elog(ERROR, "Invalid lreloid");
-		}
+
 		namecpy(&(entry->names.lrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.lrelid),
 							 entry->entry.lattnum);
 		if (!HeapTupleIsValid(tp))
-		{
 			elog(ERROR, "Invalid lattr");
-		}
+
 		namecpy(&(entry->names.lattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
 	}
@@ -475,9 +483,8 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 	{
 		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.opoid));
 		if (!HeapTupleIsValid(tp))
-		{
 			elog(ERROR, "Invalid operator");
-		}
+
 		namecpy(&(entry->names.opname), &(((Form_pg_operator) GETSTRUCT(tp))->oprname));
 		ReleaseSysCache(tp);
 	}
@@ -485,17 +492,15 @@ pgqs_fillnames(pgqsEntryWithNames * entry)
 	{
 		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.rrelid));
 		if (!HeapTupleIsValid(tp))
-		{
 			elog(ERROR, "Invalid rreloid");
-		}
+
 		namecpy(&(entry->names.rrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
 		ReleaseSysCache(tp);
 		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.rrelid),
 							 entry->entry.rattnum);
 		if (!HeapTupleIsValid(tp))
-		{
 			elog(ERROR, "Invalid rattr");
-		}
+
 		namecpy(&(entry->names.rattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
 		ReleaseSysCache(tp);
 	}
@@ -516,12 +521,12 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		 */
 		if (nesting_level == 0
 #if PG_VERSION_NUM >= 90600
-				&& (! IsParallelWorker())
+			&& (!IsParallelWorker())
 #endif
-				)
+			)
 		{
 			query_is_sampled = (random() <= (MAX_RANDOM_VALUE *
-									 pgqs_sample_rate));
+											 pgqs_sample_rate));
 #if PG_VERSION_NUM >= 90600
 			pgqs_set_query_sampled(query_is_sampled);
 #endif
@@ -542,16 +547,16 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
  */
 static void
 pgqs_ExecutorRun(QueryDesc *queryDesc,
-					ScanDirection direction,
+				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
-					uint64 count
+				 uint64 count
 #else
-					long count
+				 long count
 #endif
 #if PG_VERSION_NUM >= 100000
-					,bool execute_once
+				 ,bool execute_once
 #endif
-		)
+)
 {
 	nesting_level++;
 	PG_TRY();
@@ -609,29 +614,29 @@ static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
 	pgqsQueryStringHashKey queryKey;
-	pgqsQueryStringEntry * queryEntry;
-	bool found;
+	pgqsQueryStringEntry *queryEntry;
+	bool		found;
 
 	if (pgqs_enabled && pgqs_is_query_sampled()
 #if PG_VERSION_NUM >= 90600
-			&& (! IsParallelWorker())
+		&& (!IsParallelWorker())
 #endif
-			/*
-			 * multiple ExecutorStart/ExecutorEnd can be interleaved, so when
-			 * sampling is activated there's no guarantee that
-			 * pgqs_is_query_sampled() will only detect queries that were
-			 * actually sampled (thus having the required instrumentation set
-			 * up).  To avoid such cases, we double check that we have the
-			 * required instrumentation set up.  That won't exactly detect
-			 * the sampled queries, but that should be close enough and avoid
-			 * adding to much complexity.
-			 */
-			&& (queryDesc->instrument_options & PGQS_FLAGS) == PGQS_FLAGS
-	   )
+
+	/*
+	 * multiple ExecutorStart/ExecutorEnd can be interleaved, so when sampling
+	 * is activated there's no guarantee that pgqs_is_query_sampled() will
+	 * only detect queries that were actually sampled (thus having the
+	 * required instrumentation set up).  To avoid such cases, we double check
+	 * that we have the required instrumentation set up.  That won't exactly
+	 * detect the sampled queries, but that should be close enough and avoid
+	 * adding to much complexity.
+	 */
+		&& (queryDesc->instrument_options & PGQS_FLAGS) == PGQS_FLAGS
+		)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
-		pgqsEntry *newEntry;
+		pgqsEntry  *newEntry;
 		HASH_SEQ_STATUS local_hash_seq;
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
@@ -653,13 +658,13 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			LWLockAcquire(pgqs->querylock, LW_SHARED);
 
 			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-					context->queryId,
-					HASH_FIND, &found);
+																			  context->queryId,
+																			  HASH_FIND, &found);
 
 			/* Create the new entry if not present */
-			if(!found)
+			if (!found)
 			{
-				bool excl_found;
+				bool		excl_found;
 
 				/* Need exclusive lock to add a new hashtable entry - promote */
 				LWLockRelease(pgqs->querylock);
@@ -669,11 +674,11 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					pgqs_queryentry_dealloc();
 
 				queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-						context->queryId,
-						HASH_ENTER, &excl_found);
+																				  context->queryId,
+																				  HASH_ENTER, &excl_found);
 
 				/* Make sure it wasn't added by another backend */
-				if(!excl_found)
+				if (!excl_found)
 					strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
 			}
 
@@ -681,24 +686,22 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		}
 
 		/* create local hash table if it hasn't been created yet */
-		if (! pgqs_localhash)
+		if (!pgqs_localhash)
 		{
 			memset(&info, 0, sizeof(info));
 			info.keysize = sizeof(pgqsHashKey);
+
 			if (pgqs_resolve_oids)
-			{
 				info.entrysize = sizeof(pgqsEntryWithNames);
-			}
 			else
-			{
 				info.entrysize = sizeof(pgqsEntry);
-			}
+
 			info.hash = pgqs_hash_fn;
 
 			pgqs_localhash = hash_create("pgqs_localhash",
-					50,
-					&info,
-					HASH_ELEM | HASH_FUNCTION);
+										 50,
+										 &info,
+										 HASH_ELEM | HASH_FUNCTION);
 		}
 
 		/* retrieve quals informations, main work starts from here */
@@ -708,14 +711,14 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		if (context->nentries)
 		{
 			/*
-			 * Before acquiring exlusive lwlock, check if there's enough room to
-			 * store local hash.  Also, do not remove more than 20% of maximum
-			 * number of entries in shared memory (wether they are used or not).
-			 * This should not happen since we shouldn't store that much entries
-			 * in localhash in the first place.
+			 * Before acquiring exlusive lwlock, check if there's enough room
+			 * to store local hash.  Also, do not remove more than 20% of
+			 * maximum number of entries in shared memory (wether they are
+			 * used or not). This should not happen since we shouldn't store
+			 * that much entries in localhash in the first place.
 			 */
-			int nvictims = hash_get_num_entries(pgqs_localhash) -
-							PGQS_MAX_LOCAL_ENTRIES;
+			int			nvictims = hash_get_num_entries(pgqs_localhash) -
+			PGQS_MAX_LOCAL_ENTRIES;
 
 			if (nvictims > 0)
 				pgqs_localentry_dealloc(nvictims);
@@ -723,20 +726,20 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
 
 			while (hash_get_num_entries(pgqs_hash) +
-					hash_get_num_entries(pgqs_localhash) >= pgqs_max)
+				   hash_get_num_entries(pgqs_localhash) >= pgqs_max)
 				pgqs_entry_dealloc();
 
 			hash_seq_init(&local_hash_seq, pgqs_localhash);
 			while ((localentry = hash_seq_search(&local_hash_seq)) != NULL)
 			{
 				newEntry = (pgqsEntry *) hash_search(pgqs_hash, &localentry->key,
-						HASH_ENTER, &found);
+													 HASH_ENTER, &found);
 
 				if (!found)
 				{
 					/* raw copy the local entry */
 					memcpy(&(newEntry->lrelid), &(localentry->lrelid),
-						sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+						   sizeof(pgqsEntry) - sizeof(pgqsHashKey));
 				}
 				else
 				{
@@ -766,8 +769,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 static int
 entry_cmp(const void *lhs, const void *rhs)
 {
-	double		l_usage = (*(pgqsEntry * const *) lhs)->usage;
-	double		r_usage = (*(pgqsEntry * const *) rhs)->usage;
+	double		l_usage = (*(pgqsEntry *const *) lhs)->usage;
+	double		r_usage = (*(pgqsEntry *const *) rhs)->usage;
 
 	if (l_usage < r_usage)
 		return -1;
@@ -798,13 +801,9 @@ pgqs_entry_dealloc(void)
 	 */
 
 	if (pgqs_resolve_oids)
-	{
 		base_size = sizeof(pgqsEntryWithNames *);
-	}
 	else
-	{
 		base_size = sizeof(pgqsEntry *);
-	}
 
 	entries = palloc(hash_get_num_entries(pgqs_hash) * base_size);
 	i = 0;
@@ -824,6 +823,7 @@ pgqs_entry_dealloc(void)
 	{
 		hash_search(pgqs_hash, &entries[i]->key, HASH_REMOVE, NULL);
 	}
+
 	pfree(entries);
 }
 
@@ -854,8 +854,9 @@ pgqs_localentry_dealloc(int nvictims)
 	pgqsEntry  *localentry;
 	HASH_SEQ_STATUS local_hash_seq;
 	pgqsHashKey *victims[nvictims];
-	bool need_seq_term = true;
-	int i, ptr = 0;
+	bool		need_seq_term = true;
+	int			i,
+				ptr = 0;
 
 	if (nvictims <= 0)
 		return;
@@ -878,12 +879,12 @@ pgqs_localentry_dealloc(int nvictims)
 	if (need_seq_term)
 		hash_seq_term(&local_hash_seq);
 
-	for (i=0; i<ptr; i++)
+	for (i = 0; i < ptr; i++)
 		hash_search(pgqs_localhash, victims[i], HASH_REMOVE, NULL);
 }
 
 static void
-pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext * context)
+pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *context)
 {
 	Plan	   *plan = planstate->plan;
 	int64		oldcount = context->count;
@@ -893,6 +894,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *parent = 0;
 	List	   *indexquals = 0;
 	List	   *quals = 0;
+
 	context->planstate = planstate;
 
 	/*
@@ -979,27 +981,27 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	{
 		case T_ModifyTable:
 			pgqs_collectMemberNodeStats(((ModifyTable *) plan)->plans,
-								  ((ModifyTableState *) planstate)->mt_plans,
+										((ModifyTableState *) planstate)->mt_plans,
 										ancestors, context);
 			break;
 		case T_Append:
 			pgqs_collectMemberNodeStats(((Append *) plan)->appendplans,
-									((AppendState *) planstate)->appendplans,
+										((AppendState *) planstate)->appendplans,
 										ancestors, context);
 			break;
 		case T_MergeAppend:
 			pgqs_collectMemberNodeStats(((MergeAppend *) plan)->mergeplans,
-								((MergeAppendState *) planstate)->mergeplans,
+										((MergeAppendState *) planstate)->mergeplans,
 										ancestors, context);
 			break;
 		case T_BitmapAnd:
 			pgqs_collectMemberNodeStats(((BitmapAnd *) plan)->bitmapplans,
-								 ((BitmapAndState *) planstate)->bitmapplans,
+										((BitmapAndState *) planstate)->bitmapplans,
 										ancestors, context);
 			break;
 		case T_BitmapOr:
 			pgqs_collectMemberNodeStats(((BitmapOr *) plan)->bitmapplans,
-								  ((BitmapOrState *) planstate)->bitmapplans,
+										((BitmapOrState *) planstate)->bitmapplans,
 										ancestors, context);
 			break;
 		case T_SubqueryScan:
@@ -1016,7 +1018,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 
 static void
 pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
-							List *ancestors, pgqsWalkerContext * context)
+							List *ancestors, pgqsWalkerContext *context)
 {
 	int			nplans = list_length(plans);
 	int			j;
@@ -1026,7 +1028,7 @@ pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
 }
 
 static void
-pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * context)
+pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext *context)
 {
 	ListCell   *lst;
 
@@ -1039,7 +1041,7 @@ pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext * conte
 }
 
 static pgqsEntry *
-pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * context)
+pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context)
 {
 	OpExpr	   *op = makeNode(OpExpr);
 	int			len = 0;
@@ -1063,15 +1065,12 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 				ArrayType  *array_type;
 
 				if (arrayconst->constisnull)
-				{
 					return NULL;
-				}
+
 				array_type = DatumGetArrayTypeP(arrayconst->constvalue);
 
 				if (ARR_NDIM(array_type) > 0)
-				{
 					len = ARR_DIMS(array_type)[0];
-				}
 			}
 			break;
 		default:
@@ -1086,7 +1085,7 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext * cont
 }
 
 static pgqsEntry *
-pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
+pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 {
 	pgqsHashKey key;
 	pgqsEntry  *entry;
@@ -1102,13 +1101,11 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		return NULL;
 
 	if (IsA(expr->arg, Var))
-	{
 		newexpr = pgqs_resolve_var((Var *) expr->arg, context);
-	}
+
 	if (!(newexpr && IsA(newexpr, Var)))
-	{
 		return NULL;
-	}
+
 	var = (Var *) newexpr;
 	rte = list_nth(context->rtable, var->varno - 1);
 	switch (expr->booltesttype)
@@ -1176,20 +1173,19 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext * context)
 		}
 		if (pgqs_track_constants)
 		{
-			char * utf8const = (char *) pg_do_encoding_conversion((unsigned char*)constant,
-					strlen(constant),
-					GetDatabaseEncoding(),
-					PG_UTF8);
+			char	   *utf8const = (char *) pg_do_encoding_conversion((unsigned char *) constant,
+																	   strlen(constant),
+																	   GetDatabaseEncoding(),
+																	   PG_UTF8);
+
 			strncpy(entry->constvalue, utf8const, strlen(utf8const));
 		}
 		else
-		{
 			memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
-		}
+
 		if (pgqs_resolve_oids)
-		{
 			pgqs_fillnames((pgqsEntryWithNames *) entry);
-		}
+
 
 	}
 	entry->nbfiltered += context->nbfiltered;
@@ -1293,7 +1289,7 @@ get_const_expr(Const *constval, StringInfo buf)
 
 
 static pgqsEntry *
-pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
+pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 {
 	/* do not store more than 20% of possible entries in shared mem */
 	if (context->nentries >= PGQS_MAX_LOCAL_ENTRIES)
@@ -1326,14 +1322,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
 		key.queryid = context->queryId;
 		key.evaltype = context->evaltype;
+
 		if (IsA(node, RelabelType))
-		{
 			node = (Node *) ((RelabelType *) node)->arg;
-		}
+
 		if (IsA(node, Var))
-		{
 			node = (Node *) pgqs_resolve_var((Var *) node, context);
-		}
+
 		switch (node->type)
 		{
 			case T_Var:
@@ -1376,9 +1371,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 			sattnumdest = &(tempentry.rattnum);
 		}
 		if (IsA(node, Var))
-		{
 			node = (Node *) pgqs_resolve_var((Var *) node, context);
-		}
+
 
 		switch (node->type)
 		{
@@ -1400,9 +1394,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 		if (var != NULL)
 		{
 			pgqsEntry  *entry;
-			/* If we don't track rels in the pg_catalog schema,
-			 * lookup the schema to make sure its not pg_catalog. Otherwise,
-			 * bail out.
+
+			/*
+			 * If we don't track rels in the pg_catalog schema, lookup the
+			 * schema to make sure its not pg_catalog. Otherwise, bail out.
 			 */
 			if (!pgqs_track_pgcatalog)
 			{
@@ -1412,28 +1407,28 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				{
 					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.lrelid));
 					if (!HeapTupleIsValid(tp))
-					{
 						elog(ERROR, "Invalid reloid");
-					}
+
 					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
 					{
 						ReleaseSysCache(tp);
 						return NULL;
 					}
+
 					ReleaseSysCache(tp);
 				}
 				if (tempentry.rrelid != InvalidOid)
 				{
 					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.rrelid));
 					if (!HeapTupleIsValid(tp))
-					{
 						elog(ERROR, "Invalid reloid");
-					}
+
 					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
 					{
 						ReleaseSysCache(tp);
 						return NULL;
 					}
+
 					ReleaseSysCache(tp);
 				}
 			}
@@ -1445,7 +1440,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 
 			/* local hash, no lock needed */
 			entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER,
-					&found);
+											  &found);
 			if (!found)
 			{
 				context->nentries++;
@@ -1458,15 +1453,15 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 				entry->qualid = context->qualid;
-				strncpy(entry->constvalue, (char*) pg_do_encoding_conversion((unsigned char*) buf->data,
-							strlen(buf->data),
-							GetDatabaseEncoding(),
-							PG_UTF8),
-							PGQS_CONSTANT_SIZE);
+				strncpy(entry->constvalue, (char *) pg_do_encoding_conversion((unsigned char *) buf->data,
+																			  strlen(buf->data),
+																			  GetDatabaseEncoding(),
+																			  PG_UTF8),
+						PGQS_CONSTANT_SIZE);
+
 				if (pgqs_resolve_oids)
-				{
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
-				}
+
 			}
 
 			entry->nbfiltered += context->nbfiltered;
@@ -1482,12 +1477,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext * context)
 }
 
 static bool
-pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext * context)
+pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 {
 	if (node == NULL)
-	{
 		return false;
-	}
+
 	switch (node->type)
 	{
 		case T_BoolExpr:
@@ -1539,7 +1533,7 @@ static void
 pgqs_shmem_startup(void)
 {
 	HASHCTL		info;
-	HASHCTL 	queryinfo;
+	HASHCTL		queryinfo;
 	bool		found;
 
 	if (prev_shmem_startup_hook)
@@ -1554,14 +1548,12 @@ pgqs_shmem_startup(void)
 	info.keysize = sizeof(pgqsHashKey);
 	queryinfo.keysize = sizeof(pgqsQueryStringHashKey);
 	queryinfo.entrysize = sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char);
+
 	if (pgqs_resolve_oids)
-	{
 		info.entrysize = sizeof(pgqsEntryWithNames);
-	}
 	else
-	{
 		info.entrysize = sizeof(pgqsEntry);
-	}
+
 	info.hash = pgqs_hash_fn;
 	if (!found)
 	{
@@ -1579,24 +1571,24 @@ pgqs_shmem_startup(void)
 		pgqs->querylock = LWLockAssign();
 #endif
 	}
-# if PG_VERSION_NUM < 90500
+#if PG_VERSION_NUM < 90500
 	queryinfo.hash = pgqs_uint32_hashfn;
-# endif
+#endif
 	pgqs_hash = ShmemInitHash("pg_qualstatements_hash",
 							  pgqs_max, pgqs_max,
 							  &info,
 							  HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
 
 	pgqs_query_examples_hash = ShmemInitHash("pg_qualqueryexamples_hash",
-							 pgqs_max, pgqs_max,
-							 &queryinfo,
+											 pgqs_max, pgqs_max,
+											 &queryinfo,
 
 /* On PG > 9.5, use the HASH_BLOBS optimization for uint32 keys. */
 #if PG_VERSION_NUM >= 90500
-							 HASH_ELEM | HASH_BLOBS | HASH_FIXED_SIZE);
-# else
-							 HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
-# endif
+											 HASH_ELEM | HASH_BLOBS | HASH_FIXED_SIZE);
+#else
+											 HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
+#endif
 	LWLockRelease(AddinShmemInitLock);
 }
 
@@ -1607,15 +1599,20 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 	pgqsEntry  *entry;
 
 	if (!pgqs || !pgqs_hash)
+	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-		errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+	}
+
 	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+
 	hash_seq_init(&hash_seq, pgqs_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		hash_search(pgqs_hash, &entry->key, HASH_REMOVE, NULL);
 	}
+
 	LWLockRelease(pgqs->lock);
 	PG_RETURN_VOID();
 }
@@ -1651,7 +1648,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-		errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1678,9 +1675,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	hash_seq_init(&hash_seq, pgqs_hash);
 
 	if (include_names)
-	{
 		nb_columns += PGQS_NAME_COLUMNS;
-	}
+
 
 	Assert(nb_columns == tupdesc->natts);
 
@@ -1716,21 +1712,14 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			nulls[i++] = true;
 		}
 		if (entry->qualid == 0)
-		{
 			nulls[i++] = true;
-		}
 		else
-		{
 			values[i++] = Int64GetDatum(entry->qualid);
-		}
+
 		if (entry->key.uniquequalid == 0)
-		{
 			nulls[i++] = true;
-		}
 		else
-		{
 			values[i++] = Int64GetDatum(entry->key.uniquequalid);
-		}
 
 		values[i++] = Int64GetDatum(entry->qualnodeid);
 		values[i++] = Int64GetDatum(entry->key.uniquequalnodeid);
@@ -1739,42 +1728,32 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = Int64GetDatum(entry->nbfiltered);
 
 		if (entry->position == -1)
-		{
 			nulls[i++] = true;
-		}
 		else
-		{
 			values[i++] = Int32GetDatum(entry->position);
-		}
+
 		if (entry->key.queryid == 0)
-		{
 			nulls[i++] = true;
-		}
 		else
-		{
 			values[i++] = Int64GetDatum(entry->key.queryid);
-		}
+
 		if (entry->constvalue)
 		{
 
 			values[i++] = CStringGetTextDatum((char *) pg_do_encoding_conversion(
-						(unsigned char *) entry->constvalue,
-						strlen(entry->constvalue),
-						PG_UTF8,
-						GetDatabaseEncoding()));
+																				 (unsigned char *) entry->constvalue,
+																				 strlen(entry->constvalue),
+																				 PG_UTF8,
+																				 GetDatabaseEncoding()));
 		}
 		else
-		{
 			nulls[i++] = true;
-		}
+
 		if (entry->key.evaltype)
-		{
 			values[i++] = CharGetDatum(entry->key.evaltype);
-		}
 		else
-		{
 			nulls[i++] = true;
-		}
+
 		if (include_names)
 		{
 			if (pgqs_resolve_oids)
@@ -1792,26 +1771,27 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 			else
 			{
 				for (; i < nb_columns; i++)
-				{
 					nulls[i] = true;
-				}
 			}
 		}
 		Assert(i == nb_columns);
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
+
 	LWLockRelease(pgqs->lock);
 	tuplestore_donestoring(tupstore);
 	MemoryContextSwitchTo(oldcontext);
+
 	return (Datum) 0;
 }
 
 Datum
-pg_qualstats_example_query(PG_FUNCTION_ARGS){
-	uint32 queryid = PG_GETARG_UINT32(0);
-	pgqsQueryStringEntry * entry;
+pg_qualstats_example_query(PG_FUNCTION_ARGS)
+{
+	uint32		queryid = PG_GETARG_UINT32(0);
+	pgqsQueryStringEntry *entry;
 	pgqsQueryStringHashKey queryKey;
-	bool found;
+	bool		found;
 
 	/* don't search the hash table if track_constants isn't enabled */
 	if (!pgqs_track_constants)
@@ -1821,30 +1801,30 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS){
 
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
 	entry = hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-			queryid, HASH_FIND, &found);
+										queryid, HASH_FIND, &found);
 	LWLockRelease(pgqs->querylock);
 
-	if(found){
+	if (found)
 		PG_RETURN_TEXT_P(cstring_to_text(entry->querytext));
-	} else {
+	else
 		PG_RETURN_NULL();
-	}
 }
 
 Datum
-pg_qualstats_example_queries(PG_FUNCTION_ARGS){
+pg_qualstats_example_queries(PG_FUNCTION_ARGS)
+{
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	TupleDesc	tupdesc;
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
-	pgqsQueryStringEntry * entry;
+	pgqsQueryStringEntry *entry;
 
 	if (!pgqs || !pgqs_query_examples_hash)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-		errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
 
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -1880,9 +1860,9 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS){
 
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		Datum	   values[2];
-		bool	   nulls[2];
-		int64 queryid = entry->key.queryid;
+		Datum		values[2];
+		bool		nulls[2];
+		int64		queryid = entry->key.queryid;
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
@@ -1918,7 +1898,7 @@ pgqs_hash_fn(const void *key, Size keysize)
 
 
 static void
-pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context)
+pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
 {
 	context->outer_tlist = NIL;
 	context->inner_tlist = NIL;
@@ -1959,10 +1939,11 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext * context)
 }
 
 static Expr *
-pgqs_resolve_var(Var *var, pgqsWalkerContext * context)
+pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 {
 	List	   *tlist = NULL;
 	PlanState  *planstate = context->planstate;
+
 	pgqs_set_planstates(context->planstate, context);
 	switch (var->varno)
 	{
@@ -1976,31 +1957,40 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext * context)
 			tlist = context->index_tlist;
 			break;
 		default:
-			return (Expr*) var;
+			return (Expr *) var;
 	}
 	if (tlist != NULL)
 	{
 		TargetEntry *entry = get_tle_by_resno(tlist, var->varattno);
-		if(entry != NULL){
-			Var * newvar = (Var *) (entry->expr);
-			if(var->varno == OUTER_VAR){
+
+		if (entry != NULL)
+		{
+			Var		   *newvar = (Var *) (entry->expr);
+
+			if (var->varno == OUTER_VAR)
 				pgqs_set_planstates(context->outer_planstate, context);
-			}
-			if(var->varno == INNER_VAR){
+
+			if (var->varno == INNER_VAR)
 				pgqs_set_planstates(context->inner_planstate, context);
-			}
+
 			var = (Var *) pgqs_resolve_var(newvar, context);
 		}
 	}
-	Assert(!(IsA(var, Var) && IS_SPECIAL_VARNO(var->varno)));
+
+	Assert(!(IsA(var, Var) &&IS_SPECIAL_VARNO(var->varno)));
+
 	/* If the result is something OTHER than a var, replace it by a constexpr */
-	if(!IsA(var, Var)){
-		Const * consttext;
-		consttext = (Const*) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, false);
+	if (!IsA(var, Var))
+	{
+		Const	   *consttext;
+
+		consttext = (Const *) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, false);
 		var = (Var *) consttext;
 	}
+
 	pgqs_set_planstates(planstate, context);
-	return (Expr*) var;
+
+	return (Expr *) var;
 }
 
 /*
@@ -2013,13 +2003,10 @@ pgqs_memsize(void)
 
 	size = MAXALIGN(sizeof(pgqsSharedState));
 	if (pgqs_resolve_oids)
-	{
 		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntryWithNames)));
-	}
 	else
-	{
 		size = add_size(size, hash_estimate_size(pgqs_max, sizeof(pgqsEntry)));
-	}
+
 	if (pgqs_track_constants)
 	{
 		/*
@@ -2027,7 +2014,7 @@ pgqs_memsize(void)
 		 * non-normalized queries.
 		 */
 		size = add_size(size, hash_estimate_size(pgqs_max,
-				sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char)));
+												 sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char)));
 	}
 #if PG_VERSION_NUM >= 90600
 	size = add_size(size, pgqs_sampled_array_size());
@@ -2039,7 +2026,7 @@ pgqs_memsize(void)
 static Size
 pgqs_sampled_array_size(void)
 {
-	 /*
+	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
 	 * identified by their BackendId.  If need room fo all backend, plus
@@ -2047,12 +2034,12 @@ pgqs_sampled_array_size(void)
 	 * BackendId numerotation starts at 1
 	 */
 	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
-				+ max_worker_processes + 1));
+							+ max_worker_processes + 1));
 }
 #endif
 
 static uint32
-hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const)
+hashExpr(Expr *expr, pgqsWalkerContext *context, bool include_const)
 {
 	StringInfo	buffer = makeStringInfo();
 
@@ -2062,25 +2049,23 @@ hashExpr(Expr *expr, pgqsWalkerContext * context, bool include_const)
 }
 
 static void
-exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool include_const)
+exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include_const)
 {
 	ListCell   *lc;
-	if(expr == NULL){
+
+	if (expr == NULL)
 		return;
-	}
+
 	appendStringInfo(buffer, "%d-", expr->type);
 	if (IsA(expr, Var))
-	{
 		expr = pgqs_resolve_var((Var *) expr, context);
-	}
 
 	switch (expr->type)
 	{
 		case T_List:
 			foreach(lc, (List *) expr)
-			{
 				exprRepr((Expr *) lfirst(lc), buffer, context, include_const);
-			}
+
 			break;
 		case T_OpExpr:
 			appendStringInfo(buffer, "%d", ((OpExpr *) expr)->opno);
@@ -2089,16 +2074,13 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 		case T_Var:
 			{
 				Var		   *var = (Var *) expr;
+
 				RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
 
 				if (rte->rtekind == RTE_RELATION)
-				{
 					appendStringInfo(buffer, "%d;%d", rte->relid, var->varattno);
-				}
 				else
-				{
 					appendStringInfo(buffer, "NORTE%d;%d", var->varno, var->varattno);
-				}
 			}
 			break;
 		case T_BoolExpr:
@@ -2107,20 +2089,16 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			break;
 		case T_BooleanTest:
 			if (include_const)
-			{
 				appendStringInfo(buffer, "%d", ((BooleanTest *) expr)->booltesttype);
-			}
+
 			exprRepr((Expr *) ((BooleanTest *) expr)->arg, buffer, context, include_const);
 			break;
 		case T_Const:
 			if (include_const)
-			{
 				get_const_expr((Const *) expr, buffer);
-			}
 			else
-			{
 				appendStringInfoChar(buffer, '?');
-			}
+
 			break;
 		case T_CoerceViaIO:
 			exprRepr((Expr *) ((CoerceViaIO *) expr)->arg, buffer, context, include_const);
@@ -2132,8 +2110,8 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 			appendStringInfoString(buffer, ")");
 			break;
 		case T_MinMaxExpr:
-			appendStringInfo(buffer, "|minmax%d(", ((MinMaxExpr *)expr)->op);
-			exprRepr((Expr *) ((MinMaxExpr*) expr)->args, buffer, context, include_const);
+			appendStringInfo(buffer, "|minmax%d(", ((MinMaxExpr *) expr)->op);
+			exprRepr((Expr *) ((MinMaxExpr *) expr)->args, buffer, context, include_const);
 			appendStringInfoString(buffer, ")");
 			break;
 
@@ -2142,11 +2120,10 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext * context, bool includ
 	}
 }
 
-# if PG_VERSION_NUM < 90500
-static uint32 pgqs_uint32_hashfn(const void *key, Size keysize){
-	return ((pgqsQueryStringHashKey*)key)->queryid;
+#if PG_VERSION_NUM < 90500
+static uint32
+pgqs_uint32_hashfn(const void *key, Size keysize)
+{
+	return ((pgqsQueryStringHashKey *) key)->queryid;
 }
-# endif
-
-
-
+#endif
