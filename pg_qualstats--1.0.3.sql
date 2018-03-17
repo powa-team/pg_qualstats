@@ -56,8 +56,8 @@ LANGUAGE C;
         predicates which are used together.
       qualnodeid(bigint):
         the predicate hash. Everything (down to constants) is used to compute this hash
-	  occurences (bigint):
-	  	the number of times this predicate has been seen
+      occurences (bigint):
+        the number of times this predicate has been seen
       execution_count (bigint):
         the total number of execution of this predicate.
       nbfiltered (bigint):
@@ -92,8 +92,8 @@ LANGUAGE C;
       uniquequalid      |
       qualnodeid        | 1711571257
       uniquequalnodeid  | 466568149
-	  occurences				| 1
-      execution_count             | 1206
+      occurences        | 1
+      execution_count   | 1206
       nbfiltered        | 0
       constant_position | 47
       queryid           | 3644521490
