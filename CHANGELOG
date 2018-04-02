@@ -1,3 +1,7 @@
+1.0.4 (WIP):
+    - Fix a bug in Bitmap Index Scan nodes handling for PostgreSQL 10+ (Fix by
+      Julien Rouhaud, thanks to Marc Cousin and Adrien Nayrat for reporting the
+      issue)
 1.0.3:
   Bugfix:
     - Fix a missing call to InstrEndLoop (Tomas Vondra)
