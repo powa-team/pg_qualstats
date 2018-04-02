@@ -911,8 +911,11 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			quals = plan->qual;
 			break;
 		case T_IndexScan:
-		case T_BitmapIndexScan:
 			indexquals = ((IndexScan *) plan)->indexqualorig;
+			quals = plan->qual;
+			break;
+		case T_BitmapIndexScan:
+			indexquals = ((BitmapIndexScan *) plan)->indexqualorig;
 			quals = plan->qual;
 			break;
 		case T_CteScan:
