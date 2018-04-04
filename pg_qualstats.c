@@ -1544,7 +1544,11 @@ pgqs_shmem_startup(void)
 	pgqs = NULL;
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	pgqs = ShmemInitStruct("pg_qualstats",
-						   sizeof(pgqsSharedState),
+						   (sizeof(pgqsSharedState)
+#if PG_VERSION_NUM >= 90600
+							+ pgqs_sampled_array_size()
+#endif
+						   ),
 						   &found);
 	memset(&info, 0, sizeof(info));
 	memset(&queryinfo, 0, sizeof(queryinfo));
@@ -2020,7 +2024,7 @@ pgqs_memsize(void)
 												 sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char)));
 	}
 #if PG_VERSION_NUM >= 90600
-	size = add_size(size, pgqs_sampled_array_size());
+	size = add_size(size, MAXALIGN(pgqs_sampled_array_size()));
 #endif
 	return size;
 }
@@ -2032,9 +2036,9 @@ pgqs_sampled_array_size(void)
 	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
-	 * identified by their BackendId.  If need room fo all backend, plus
-	 * aotovacuum launcher and workers, plus bg workers and an extra one since
-	 * BackendId numerotation starts at 1
+	 * identified by their BackendId.  If need room for all possible backends, plus
+	 * autovacuum launcher and workers, plus bg workers and an extra one since
+	 * BackendId numerotation starts at 1.
 	 */
 	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
 							+ max_worker_processes + 1));

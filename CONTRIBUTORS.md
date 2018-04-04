@@ -7,3 +7,4 @@
   * Stéphane Tachoires
   * Pavel Trukhanov
   * Andreas Seltenreich
+  * Nicolas Gollet
