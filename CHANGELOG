@@ -1,7 +1,9 @@
-1.0.4 (WIP):
+1.0.4:
     - Fix a bug in Bitmap Index Scan nodes handling for PostgreSQL 10+ (Fix by
       Julien Rouhaud, thanks to Marc Cousin and Adrien Nayrat for reporting the
       issue)
+    - Fix sampled array buffer overflow (Fix by Julien Rouhaud, reporting and
+      much testing by Nicolas Gollet)
 1.0.3:
   Bugfix:
     - Fix a missing call to InstrEndLoop (Tomas Vondra)
