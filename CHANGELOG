@@ -1,4 +1,11 @@
 1.0.5:
+  Incompatibilites:
+    - Due to changes in pg_stat_statements in 11, queryid is now on 64 bits.
+      SQL functions no longer use oid type but bigint for queryid attribute
+      (even for PG prior to 11).
+  Miscellaneous:
+    - Add pg 11 compatibility (Adrien Nayrat helped by Julien Rouhaud
+      and Thomas Reiss)
 1.0.4:
     - Fix a bug in Bitmap Index Scan nodes handling for PostgreSQL 10+ (Fix by
       Julien Rouhaud, thanks to Marc Cousin and Adrien Nayrat for reporting the
