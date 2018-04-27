@@ -160,11 +160,19 @@ typedef struct pgqsSharedState
 #endif
 } pgqsSharedState;
 
+/* Since cff440d368, queryid becomes a uint64 internally. */
+
+#if PG_VERSION_NUM >= 110000
+typedef uint64 pgqs_queryid;
+#else
+typedef uint32 pgqs_queryid;
+#endif
+
 typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	uint32		queryid;		/* query identifier (if set by another plugin */
+	pgqs_queryid		queryid;	/* query identifier (if set by another plugin */
 	uint32		uniquequalnodeid;	/* Hash of the const */
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
@@ -215,7 +223,7 @@ typedef struct pgqsEntryWithNames
 
 typedef struct pgqsQueryStringHashKey
 {
-	uint32		queryid;
+	pgqs_queryid queryid;
 } pgqsQueryStringHashKey;
 
 typedef struct pgqsQueryStringEntry
@@ -235,7 +243,7 @@ typedef struct pgqsQueryStringEntry
  */
 typedef struct pgqsWalkerContext
 {
-	uint32		queryId;
+	pgqs_queryid		queryId;
 	List	   *rtable;
 	PlanState  *planstate;
 	PlanState  *inner_planstate;
@@ -1795,7 +1803,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 Datum
 pg_qualstats_example_query(PG_FUNCTION_ARGS)
 {
-	uint32		queryid = PG_GETARG_UINT32(0);
+    #if PG_VERSION_NUM >= 110000
+	pgqs_queryid queryid = PG_GETARG_INT64(0);
+    #else
+	pgqs_queryid queryid = PG_GETARG_UINT32(0);
+    #endif
 	pgqsQueryStringEntry *entry;
 	pgqsQueryStringHashKey queryKey;
 	bool		found;
