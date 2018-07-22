@@ -1752,7 +1752,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		else
 			values[i++] = Int64GetDatum(entry->key.queryid);
 
-		if (entry->constvalue)
+		if (entry->constvalue[0] != '\0')
 		{
 
 			values[i++] = CStringGetTextDatum((char *) pg_do_encoding_conversion(
