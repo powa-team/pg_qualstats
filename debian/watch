@@ -1,0 +1,2 @@
+version=3
+https://github.com/powa-team/pg_qualstats/releases .*/archive/(.*).tar.gz
