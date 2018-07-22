@@ -1517,7 +1517,7 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 					context->qualid = 0;
 					context->uniquequalid = 0;
 				}
-				if ((boolexpr->boolop == AND_EXPR))
+				if (boolexpr->boolop == AND_EXPR)
 				{
 					context->uniquequalid = hashExpr((Expr *) boolexpr, context, pgqs_track_constants);
 					context->qualid = hashExpr((Expr *) boolexpr, context, false);
