@@ -1,0 +1,48 @@
+CREATE EXTENSION pg_qualstats;
+-- Make sure sure we'll see at least one qual
+SET pg_qualstats.sample_rate = 1;
+CREATE TABLE pgqs AS SELECT id FROM generate_series(1, 100) id;
+SELECT COUNT(*) FROM pgqs WHERE id = 1;
+ count 
+-------
+     1
+(1 row)
+
+SELECT lrelid::regclass::text, lattnum, occurences, execution_count,
+    nbfiltered, constvalue, eval_type
+FROM pg_qualstats;
+ lrelid | lattnum | occurences | execution_count | nbfiltered | constvalue | eval_type 
+--------+---------+------------+-----------------+------------+------------+-----------
+ pgqs   |       1 |          1 |             100 |         99 | 1::integer | f
+(1 row)
+
+SELECT COUNT(*) > 0 FROM pg_qualstats;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT COUNT(*) > 0 FROM pg_qualstats();
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT COUNT(*) > 0 FROM pg_qualstats_example_queries();
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+SELECT COUNT(*) FROM pg_qualstats();
+ count 
+-------
+     0
+(1 row)
+
