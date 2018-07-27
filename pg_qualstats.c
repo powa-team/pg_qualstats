@@ -385,6 +385,8 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
+	EmitWarningsOnPlaceholders("pg_qualstats");
+
 	parse_int(GetConfigOption("track_activity_query_size", false, false),
 			  &pgqs_query_size, 0, NULL);
 	RequestAddinShmemSpace(pgqs_memsize());
