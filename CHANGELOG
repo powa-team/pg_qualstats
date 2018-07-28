@@ -6,6 +6,7 @@
   Miscellaneous:
     - Add pg 11 compatibility (Adrien Nayrat helped by Julien Rouhaud
       and Thomas Reiss)
+    - Warn if incorrect configuration setting is used
 1.0.4:
     - Fix a bug in Bitmap Index Scan nodes handling for PostgreSQL 10+ (Fix by
       Julien Rouhaud, thanks to Marc Cousin and Adrien Nayrat for reporting the
