@@ -1,3 +1,7 @@
+1.0.6(WIP):
+  Bugfix:
+    - Fix bug for handling of nodes having multiple children, such as Append
+      node (Julien Rouhaud).
 1.0.5:
   Incompatibilites:
     - Due to changes in pg_stat_statements in 11, queryid is now on 64 bits.

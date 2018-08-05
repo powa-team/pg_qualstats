@@ -266,7 +266,7 @@ static pgqsEntry *pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context);
 static pgqsEntry *pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *context);
 static pgqsEntry *pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context);
 static void pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *context);
-static void pgqs_collectMemberNodeStats(List *plans, PlanState **planstates, List *ancestors, pgqsWalkerContext *context);
+static void pgqs_collectMemberNodeStats(int nplans, PlanState **planstates, List *ancestors, pgqsWalkerContext *context);
 static void pgqs_collectSubPlanStats(List *plans, List *ancestors, pgqsWalkerContext *context);
 static uint32 hashExpr(Expr *expr, pgqsWalkerContext *context, bool include_const);
 static void exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include_const);
@@ -993,27 +993,27 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	switch (nodeTag(plan))
 	{
 		case T_ModifyTable:
-			pgqs_collectMemberNodeStats(((ModifyTable *) plan)->plans,
+			pgqs_collectMemberNodeStats(((ModifyTableState *) planstate)->mt_nplans,
 										((ModifyTableState *) planstate)->mt_plans,
 										ancestors, context);
 			break;
 		case T_Append:
-			pgqs_collectMemberNodeStats(((Append *) plan)->appendplans,
+			pgqs_collectMemberNodeStats(((AppendState *) planstate)->as_nplans,
 										((AppendState *) planstate)->appendplans,
 										ancestors, context);
 			break;
 		case T_MergeAppend:
-			pgqs_collectMemberNodeStats(((MergeAppend *) plan)->mergeplans,
+			pgqs_collectMemberNodeStats(((MergeAppendState *) planstate)->ms_nplans,
 										((MergeAppendState *) planstate)->mergeplans,
 										ancestors, context);
 			break;
 		case T_BitmapAnd:
-			pgqs_collectMemberNodeStats(((BitmapAnd *) plan)->bitmapplans,
+			pgqs_collectMemberNodeStats(((BitmapAndState *) planstate)->nplans,
 										((BitmapAndState *) planstate)->bitmapplans,
 										ancestors, context);
 			break;
 		case T_BitmapOr:
-			pgqs_collectMemberNodeStats(((BitmapOr *) plan)->bitmapplans,
+			pgqs_collectMemberNodeStats(((BitmapOrState *) planstate)->nplans,
 										((BitmapOrState *) planstate)->bitmapplans,
 										ancestors, context);
 			break;
@@ -1030,10 +1030,9 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 }
 
 static void
-pgqs_collectMemberNodeStats(List *plans, PlanState **planstates,
+pgqs_collectMemberNodeStats(int nplans, PlanState **planstates,
 							List *ancestors, pgqsWalkerContext *context)
 {
-	int			nplans = list_length(plans);
 	int			j;
 
 	for (j = 0; j < nplans; j++)
