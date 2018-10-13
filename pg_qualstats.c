@@ -728,7 +728,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			 * that much entries in localhash in the first place.
 			 */
 			int			nvictims = hash_get_num_entries(pgqs_localhash) -
-			PGQS_MAX_LOCAL_ENTRIES;
+				PGQS_MAX_LOCAL_ENTRIES;
 
 			if (nvictims > 0)
 				pgqs_localentry_dealloc(nvictims);
@@ -857,19 +857,24 @@ pgqs_queryentry_dealloc(void)
 }
 
 /*
- * Remove the requested number of entries from pgqs_localhash */
+ * Remove the requested number of entries from pgqs_localhash.  Since the
+ * entries are all coming from the same query, remove them without any specific
+ * sort.
+ */
 static void
 pgqs_localentry_dealloc(int nvictims)
 {
 	pgqsEntry  *localentry;
 	HASH_SEQ_STATUS local_hash_seq;
-	pgqsHashKey *victims[nvictims];
+	pgqsHashKey **victims;
 	bool		need_seq_term = true;
 	int			i,
 				ptr = 0;
 
 	if (nvictims <= 0)
 		return;
+
+	victims = palloc(sizeof(pgqsHashKey *) * nvictims);
 
 	hash_seq_init(&local_hash_seq, pgqs_localhash);
 	while (nvictims-- >= 0)
@@ -891,6 +896,8 @@ pgqs_localentry_dealloc(int nvictims)
 
 	for (i = 0; i < ptr; i++)
 		hash_search(pgqs_localhash, victims[i], HASH_REMOVE, NULL);
+
+	pfree(victims);
 }
 
 static void
