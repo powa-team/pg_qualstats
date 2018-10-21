@@ -16,7 +16,7 @@ override_dh_auto_install:
 	+pg_buildext loop postgresql-%v-pg-qualstats
 
 override_dh_installdocs:
-	dh_installdocs --all CONTRIBUTORS.md README.md
+	dh_installdocs --all CONTRIBUTORS.md doc/README.md
 	rm -rvf debian/*/usr/share/doc/postgresql-doc-*
 
 override_dh_installchangelogs:
