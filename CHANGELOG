@@ -1,7 +1,11 @@
-1.0.6(WIP):
+1.0.6
   Bugfix:
     - Fix bug for handling of nodes having multiple children, such as Append
       node (Julien Rouhaud).
+  Miscellaneous:
+    - Fix compilation issue with C90 compatibility (Julien Rouhaud)
+    - Fix README.d installation in debian packaging (Thanks to Andreas Beckmann
+      for the report)
 1.0.5:
   Incompatibilites:
     - Due to changes in pg_stat_statements in 11, queryid is now on 64 bits.
