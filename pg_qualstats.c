@@ -1961,6 +1961,12 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
 	/* index_tlist is set only if it's an IndexOnlyScan */
 	if (IsA(planstate->plan, IndexOnlyScan))
 		context->index_tlist = ((IndexOnlyScan *) planstate->plan)->indextlist;
+#if PG_VERSION_NUM >= 90500
+	else if (IsA(planstate->plan, ForeignScan))
+		context->index_tlist = ((ForeignScan *) planstate->plan)->fdw_scan_tlist;
+	else if (IsA(planstate->plan, CustomScan))
+		context->index_tlist = ((CustomScan *) planstate->plan)->custom_scan_tlist;
+#endif
 	else
 		context->index_tlist = NIL;
 }
@@ -2004,7 +2010,7 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 		}
 	}
 
-	Assert(!(IsA(var, Var) &&IS_SPECIAL_VARNO(var->varno)));
+	Assert(!(IsA(var, Var) && IS_SPECIAL_VARNO(var->varno)));
 
 	/* If the result is something OTHER than a var, replace it by a constexpr */
 	if (!IsA(var, Var))
