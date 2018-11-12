@@ -8,6 +8,13 @@ pg-qualstats (1.0.6-1) unstable; urgency=medium
 
  -- Julien Rouhaud <rjuju123@gmail.com>  Sun, 21 Oct 2018 21:00:57 +0000
 
+pg-qualstats (1.0.5-2) unstable; urgency=medium
+
+  * Team upload.
+  * Upload for PostgreSQL 11.
+
+ -- Christoph Berg <myon@debian.org>  Fri, 12 Oct 2018 13:05:30 +0200
+
 pg-qualstats (1.0.5-1) unstable; urgency=low
 
   * Initial release.

@@ -8,39 +8,9 @@ Homepage: https://powa.readthedocs.io/
 Vcs-Browser: https://github.com/powa-team/pg_qualstats
 Vcs-Git: https://github.com/powa-team/pg_qualstats.git
 
-Package: postgresql-9.4-pg-qualstats
+Package: postgresql-11-pg-qualstats
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-9.4
-Description: PostgreSQL extension to gather statistics about predicates.
- This extensions tracks WHERE clauses predicates and JOIN predicates.
- Statistics will report whether the predicate was evaluated as an index scan or
- not, how many time the expression appeared, how many times the operator was
- executed and how filtering the expression is.  If pg_stat_statements is
- enabled, it can also track to which statements the predicate belongs.
-
-Package: postgresql-9.5-pg-qualstats
-Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-9.5
-Description: PostgreSQL extension to gather statistics about predicates.
- This extensions tracks WHERE clauses predicates and JOIN predicates.
- Statistics will report whether the predicate was evaluated as an index scan or
- not, how many time the expression appeared, how many times the operator was
- executed and how filtering the expression is.  If pg_stat_statements is
- enabled, it can also track to which statements the predicate belongs.
-
-Package: postgresql-9.6-pg-qualstats
-Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-9.6
-Description: PostgreSQL extension to gather statistics about predicates.
- This extensions tracks WHERE clauses predicates and JOIN predicates.
- Statistics will report whether the predicate was evaluated as an index scan or
- not, how many time the expression appeared, how many times the operator was
- executed and how filtering the expression is.  If pg_stat_statements is
- enabled, it can also track to which statements the predicate belongs.
-
-Package: postgresql-10-pg-qualstats
-Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-10
+Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-11
 Description: PostgreSQL extension to gather statistics about predicates.
  This extensions tracks WHERE clauses predicates and JOIN predicates.
  Statistics will report whether the predicate was evaluated as an index scan or
