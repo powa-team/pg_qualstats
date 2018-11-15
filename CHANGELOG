@@ -1,9 +1,11 @@
-1.0.7(WIP)
+1.0.7
   Bugfix:
     - Fix a bug for queries having JOIN or WHERE predicates on foreign tables
       or custom scans (Julien Rouhaud).  Thanks a lot to Andrej Urvantsev,
       Raymond Barbiero and mbroxson who all reported this issue, and especially
       to mbroxson who provided a reproducer!
+  Miscellaneous:
+    - Fix debian packaging to ignore debian/* tags (Christoph Berg)
 1.0.6
   Bugfix:
     - Fix bug for handling of nodes having multiple children, such as Append

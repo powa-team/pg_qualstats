@@ -1,8 +1,12 @@
-pg-qualstats (1.0.6-2) UNRELEASED; urgency=medium
+pg-qualstats (1.0.7.1) unstable; urgency=medium
 
+  [ Christoph Berg ]
   * Fix watch file to ignore debian/* tags.
 
- -- Christoph Berg <christoph.berg@credativ.de>  Mon, 12 Nov 2018 15:52:24 +0100
+  [ Julien Rouhaud ]
+  * New upstream version
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Thu, 15 Nov 2018 21:31:52 +0000
 
 pg-qualstats (1.0.6-1) unstable; urgency=medium
 
