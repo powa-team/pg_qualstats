@@ -1,4 +1,4 @@
-pg-qualstats (1.0.7.1) unstable; urgency=medium
+pg-qualstats (1.0.7-1) unstable; urgency=medium
 
   [ Christoph Berg ]
   * Fix watch file to ignore debian/* tags.
