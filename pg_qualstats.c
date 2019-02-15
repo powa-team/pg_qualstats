@@ -44,7 +44,6 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
-#include "optimizer/var.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
