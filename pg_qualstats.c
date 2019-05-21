@@ -1063,7 +1063,7 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *conte
 {
 	OpExpr	   *op = makeNode(OpExpr);
 	int			len = 0;
-	pgqsEntry  *entry;
+	pgqsEntry  *entry = NULL;
 	Expr	   *array = lsecond(expr->args);
 
 	op->opno = expr->opno;
@@ -1094,11 +1094,13 @@ pgqs_process_scalararrayopexpr(ScalarArrayOpExpr *expr, pgqsWalkerContext *conte
 		default:
 			break;
 	}
+
 	if (len > 0)
 	{
 		context->count *= len;
 		entry = pgqs_process_opexpr(op, context);
 	}
+
 	return entry;
 }
 
