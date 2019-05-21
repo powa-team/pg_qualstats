@@ -1,3 +1,7 @@
+1.0.8
+  Miscellaneous:
+    - Fix pg12 compatibility
+    - Fix possible issue with array processing
 1.0.7
   Bugfix:
     - Fix a bug for queries having JOIN or WHERE predicates on foreign tables
