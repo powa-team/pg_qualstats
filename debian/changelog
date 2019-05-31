@@ -1,3 +1,9 @@
+pg-qualstats (1.0.8-1) experimental; urgency=medium
+
+  * New upstream version compatible with PG12.
+
+ -- Christoph Berg <myon@debian.org>  Fri, 31 May 2019 14:12:34 +0200
+
 pg-qualstats (1.0.7-1) unstable; urgency=medium
 
   [ Christoph Berg ]
