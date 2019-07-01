@@ -1,3 +1,7 @@
+1.0.9(WIP)
+  Bugfix:
+    - Fix constant value truncation when multibyte encoding characters are used
+      (thanks to Gürkan Gür for the report)
 1.0.8
   Miscellaneous:
     - Fix pg12 compatibility

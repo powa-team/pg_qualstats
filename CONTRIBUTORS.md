@@ -8,3 +8,4 @@
   * Pavel Trukhanov
   * Andreas Seltenreich
   * Nicolas Gollet
+  * Gürkan Gür

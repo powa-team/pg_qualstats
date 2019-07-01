@@ -1463,6 +1463,9 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 											  &found);
 			if (!found)
 			{
+				char   *utf8const;
+				int		len;
+
 				context->nentries++;
 
 				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
@@ -1473,11 +1476,24 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 				entry->qualid = context->qualid;
-				strncpy(entry->constvalue, (char *) pg_do_encoding_conversion((unsigned char *) buf->data,
-																			  strlen(buf->data),
-																			  GetDatabaseEncoding(),
-																			  PG_UTF8),
-						PGQS_CONSTANT_SIZE);
+
+				utf8const = (char *) pg_do_encoding_conversion((unsigned char *) buf->data,
+																strlen(buf->data),
+																GetDatabaseEncoding(),
+																PG_UTF8);
+				len = strlen(utf8const);
+
+				/*
+				 * The const value can use multibyte characters, so we need to
+				 * be careful when truncating the value.  Note that we need to
+				 * use PG_UTF8 encoding explicitly here, as the value was just
+				 * converted to this encoding.
+				 */
+				len = pg_encoding_mbcliplen(PG_UTF8, utf8const, len,
+						PGQS_CONSTANT_SIZE - 1);
+
+				memcpy(entry->constvalue, utf8const, len);
+				entry->constvalue[len] = '\0';
 
 				if (pgqs_resolve_oids)
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
