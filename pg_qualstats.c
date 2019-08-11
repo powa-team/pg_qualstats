@@ -850,7 +850,8 @@ pgqs_queryentry_dealloc(void)
 	entry = hash_seq_search(&hash_seq);
 
 	if (entry != NULL)
-		hash_search_with_hash_value(pgqs_query_examples_hash, &entry->key, ((pgqsQueryStringHashKey) entry->key).queryid, HASH_REMOVE, NULL);
+		hash_search_with_hash_value(pgqs_query_examples_hash, &entry->key,
+				entry->key.queryid, HASH_REMOVE, NULL);
 
 	hash_seq_term(&hash_seq);
 }
