@@ -1,3 +1,9 @@
+pg-qualstats (1.0.9-1) experimental; urgency=medium
+
+  * New upstream version.
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Thu, 05 Sep 2019 08:26:19 +0200
+
 pg-qualstats (1.0.8-1) experimental; urgency=medium
 
   * New upstream version compatible with PG12.
