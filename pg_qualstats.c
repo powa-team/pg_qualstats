@@ -64,7 +64,6 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
-#include "utils/syscache.h"
 #include "utils/tuplestore.h"
 
 PG_MODULE_MAGIC;
@@ -85,7 +84,6 @@ PG_MODULE_MAGIC;
 void		_PG_init(void);
 void		_PG_fini(void);
 
-
 extern Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats_names(PG_FUNCTION_ARGS);
@@ -101,8 +99,7 @@ PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
-static void
-pgqs_ExecutorRun(QueryDesc *queryDesc,
+static void pgqs_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
 				 uint64 count
@@ -110,7 +107,7 @@ pgqs_ExecutorRun(QueryDesc *queryDesc,
 				 long count
 #endif
 #if PG_VERSION_NUM >= 100000
-				 ,bool execute_once
+				 , bool execute_once
 #endif
 );
 static void pgqs_ExecutorFinish(QueryDesc *queryDesc);
@@ -185,7 +182,6 @@ typedef struct pgqsHashKey
 								 * indexqual */
 } pgqsHashKey;
 
-
 typedef struct pgqsNames
 {
 	NameData	rolname;
@@ -197,15 +193,14 @@ typedef struct pgqsNames
 	NameData	rattname;
 } pgqsNames;
 
-
 typedef struct pgqsEntry
 {
 	pgqsHashKey key;
-	Oid			lrelid;			/* relation OID or NULL if not var */
-	AttrNumber	lattnum;		/* Attribute Number or NULL if not var */
+	Oid			lrelid;			/* LHS relation OID or NULL if not var */
+	AttrNumber	lattnum;		/* LHS attribute Number or NULL if not var */
 	Oid			opoid;			/* Operator OID */
-	Oid			rrelid;			/* relation OID or NULL if not var */
-	AttrNumber	rattnum;		/* Attribute Number or NULL if not var */
+	Oid			rrelid;			/* RHS relation OID or NULL if not var */
+	AttrNumber	rattnum;		/* RHS attribute Number or NULL if not var */
 	char		constvalue[PGQS_CONSTANT_SIZE]; /* Textual representation of
 												 * the right hand constant, if
 												 * any */
@@ -280,6 +275,8 @@ static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext *context);
 
 
 static void pgqs_entry_dealloc(void);
+static inline void pgqs_entry_init(pgqsEntry *entry);
+static inline void pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_localentry_dealloc(int nvictims);
 static void pgqs_fillnames(pgqsEntryWithNames *entry);
@@ -470,7 +467,11 @@ pgqs_is_query_sampled(void)
 void
 pgqs_fillnames(pgqsEntryWithNames *entry)
 {
-	HeapTuple	tp;
+#if PG_VERSION_NUM >= 110000
+#define GET_ATTNAME(r, a)	get_attname(r, a, false)
+#else
+#define GET_ATTNAME(r, a)	get_attname(r, a)
+#endif
 
 #if PG_VERSION_NUM >= 90500
 	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid, true));
@@ -478,47 +479,26 @@ pgqs_fillnames(pgqsEntryWithNames *entry)
 	namestrcpy(&(entry->names.rolname), GetUserNameFromId(entry->entry.key.userid));
 #endif
 	namestrcpy(&(entry->names.datname), get_database_name(entry->entry.key.dbid));
+
 	if (entry->entry.lrelid != InvalidOid)
 	{
-		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.lrelid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "Invalid lreloid");
-
-		namecpy(&(entry->names.lrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
-		ReleaseSysCache(tp);
-		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.lrelid),
-							 entry->entry.lattnum);
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "Invalid lattr");
-
-		namecpy(&(entry->names.lattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
-		ReleaseSysCache(tp);
+		namestrcpy(&(entry->names.lrelname),
+				   get_rel_name(entry->entry.lrelid));
+		namestrcpy(&(entry->names.lattname),
+				   GET_ATTNAME(entry->entry.lrelid, entry->entry.lattnum));
 	}
+
 	if (entry->entry.opoid != InvalidOid)
-	{
-		tp = SearchSysCache1(OPEROID, ObjectIdGetDatum(entry->entry.opoid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "Invalid operator");
+		namestrcpy(&(entry->names.opname), get_opname(entry->entry.opoid));
 
-		namecpy(&(entry->names.opname), &(((Form_pg_operator) GETSTRUCT(tp))->oprname));
-		ReleaseSysCache(tp);
-	}
 	if (entry->entry.rrelid != InvalidOid)
 	{
-		tp = SearchSysCache1(RELOID, ObjectIdGetDatum(entry->entry.rrelid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "Invalid rreloid");
-
-		namecpy(&(entry->names.rrelname), &(((Form_pg_class) GETSTRUCT(tp))->relname));
-		ReleaseSysCache(tp);
-		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(entry->entry.rrelid),
-							 entry->entry.rattnum);
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "Invalid rattr");
-
-		namecpy(&(entry->names.rattname), &(((Form_pg_attribute) GETSTRUCT(tp))->attname));
-		ReleaseSysCache(tp);
+		namestrcpy(&(entry->names.rrelname),
+				   get_rel_name(entry->entry.rrelid));
+		namestrcpy(&(entry->names.rattname),
+				   GET_ATTNAME(entry->entry.rrelid, entry->entry.rattnum));
 	}
+#undef GET_ATTNAME
 }
 
 /*
@@ -753,8 +733,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 				if (!found)
 				{
 					/* raw copy the local entry */
-					memcpy(&(newEntry->lrelid), &(localentry->lrelid),
-						   sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+					pgqs_entry_copy_raw(newEntry, localentry);
 				}
 				else
 				{
@@ -814,13 +793,13 @@ pgqs_entry_dealloc(void)
 	 * them. While we're scanning the table, apply the decay factor to the
 	 * usage values.
 	 */
-
 	if (pgqs_resolve_oids)
 		base_size = sizeof(pgqsEntryWithNames *);
 	else
 		base_size = sizeof(pgqsEntry *);
 
 	entries = palloc(hash_get_num_entries(pgqs_hash) * base_size);
+
 	i = 0;
 	hash_seq_init(&hash_seq, pgqs_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
@@ -835,11 +814,27 @@ pgqs_entry_dealloc(void)
 	nvictims = Min(nvictims, i);
 
 	for (i = 0; i < nvictims; i++)
-	{
 		hash_search(pgqs_hash, &entries[i]->key, HASH_REMOVE, NULL);
-	}
 
 	pfree(entries);
+}
+
+/* Initialize all non-key fields of the given entry. */
+static inline void
+pgqs_entry_init(pgqsEntry *entry)
+{
+	/* Note that pgqsNames if needed will be explicitly filled after this */
+	memset(&(entry->lrelid), 0, sizeof(pgqsEntry) - sizeof(pgqsHashKey));
+}
+
+/* Copy non-key and non-name fields from the given entry */
+static inline void
+pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src)
+{
+	/* Note that pgqsNames if needed will be explicitly filled after this */
+	memcpy(&(dest->lrelid),
+		   &(src->lrelid),
+		   (sizeof(pgqsEntry) - sizeof(pgqsHashKey)));
 }
 
 /*
@@ -910,6 +905,7 @@ static void
 pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *context)
 {
 	Plan	   *plan = planstate->plan;
+	Instrumentation *instrument = planstate->instrument;
 	int64		oldcount = context->count;
 	double		oldfiltered = context->nbfiltered;
 	double		total_filtered = 0;
@@ -924,9 +920,10 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	 * We have to forcibly clean up the instrumentation state because we
 	 * haven't done ExecutorEnd yet.  This is pretty grotty ...
 	 */
-	if (planstate->instrument)
-		InstrEndLoop(planstate->instrument);
+	if (instrument)
+		InstrEndLoop(instrument);
 
+	/* Retrieve the generic quals and indexquals */
 	switch (nodeTag(plan))
 	{
 		case T_IndexOnlyScan:
@@ -966,6 +963,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			break;
 
 	}
+
 	pgqs_set_planstates(planstate, context);
 	parent = list_union(indexquals, quals);
 	if (list_length(parent) > 1)
@@ -973,9 +971,11 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		context->uniquequalid = hashExpr((Expr *) parent, context, true);
 		context->qualid = hashExpr((Expr *) parent, context, false);
 	}
-	total_filtered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
-	context->nbfiltered = planstate->instrument->nfiltered1 + planstate->instrument->nfiltered2;
-	context->count = planstate->instrument->tuplecount + planstate->instrument->ntuples + total_filtered;
+
+	total_filtered = instrument->nfiltered1 + instrument->nfiltered2;
+	context->nbfiltered = total_filtered;
+	context->count = instrument->tuplecount + instrument->ntuples + total_filtered;
+
 	/* Add the indexquals */
 	context->evaltype = 'i';
 	expression_tree_walker((Node *) indexquals, pgqs_whereclause_tree_walker, context);
@@ -983,6 +983,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	/* Add the generic quals */
 	context->evaltype = 'f';
 	expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker, context);
+
 	context->qualid = 0;
 	context->uniquequalid = 0;
 	context->count = oldcount;
@@ -1002,6 +1003,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	/* righttree */
 	if (innerPlanState(planstate))
 		pgqs_collectNodeStats(innerPlanState(planstate), ancestors, context);
+
 	/* special child plans */
 	switch (nodeTag(plan))
 	{
@@ -1046,10 +1048,10 @@ static void
 pgqs_collectMemberNodeStats(int nplans, PlanState **planstates,
 							List *ancestors, pgqsWalkerContext *context)
 {
-	int			j;
+	int			i;
 
-	for (j = 0; j < nplans; j++)
-		pgqs_collectNodeStats(planstates[j], ancestors, context);
+	for (i = 0; i < nplans; i++)
+		pgqs_collectNodeStats(planstates[i], ancestors, context);
 }
 
 static void
@@ -1179,25 +1181,17 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 	{
 		context->nentries++;
 
-		entry->count = 0;
-		entry->nbfiltered = 0;
-		entry->usage = 0;
-		entry->occurences = 0;
-		entry->position = 0;
+		pgqs_entry_init(entry);
 		entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 		entry->qualid = context->qualid;
 		entry->opoid = opoid;
-		entry->lrelid = InvalidOid;
-		entry->lattnum = InvalidAttrNumber;
-		entry->rrelid = InvalidOid;
-		entry->rattnum = InvalidAttrNumber;
-
 
 		if (rte->rtekind == RTE_RELATION)
 		{
 			entry->lrelid = rte->relid;
 			entry->lattnum = var->varattno;
 		}
+
 		if (pgqs_track_constants)
 		{
 			char	   *utf8const = (char *) pg_do_encoding_conversion((unsigned char *) constant,
@@ -1212,9 +1206,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 
 		if (pgqs_resolve_oids)
 			pgqs_fillnames((pgqsEntryWithNames *) entry);
-
-
 	}
+
 	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
 	entry->usage += 1;
@@ -1243,9 +1236,7 @@ get_const_expr(Const *constval, StringInfo buf)
 		return;
 	}
 
-	getTypeOutputInfo(constval->consttype,
-					  &typoutput, &typIsVarlena);
-
+	getTypeOutputInfo(constval->consttype, &typoutput, &typIsVarlena);
 	extval = OidOutputFunctionCall(typoutput, constval->constvalue);
 
 	switch (constval->consttype)
@@ -1261,7 +1252,7 @@ get_const_expr(Const *constval, StringInfo buf)
 				/*
 				 * These types are printed without quotes unless they contain
 				 * values that aren't accepted by the scanner unquoted (e.g.,
-				 * 'NaN').	Note that strtod() and friends might accept NaN,
+				 * 'NaN').  Note that strtod() and friends might accept NaN,
 				 * so we can't use that to test.
 				 *
 				 * In reality we only need to defend against infinity and NaN,
@@ -1314,7 +1305,6 @@ get_const_expr(Const *constval, StringInfo buf)
 
 }
 
-
 static pgqsEntry *
 pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 {
@@ -1336,11 +1326,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 		pgqsEntry	tempentry;
 
+		pgqs_entry_init(&tempentry);
 		tempentry.opoid = expr->opno;
-		tempentry.lattnum = InvalidAttrNumber;
-		tempentry.lrelid = InvalidOid;
-		tempentry.rattnum = InvalidAttrNumber;
-		tempentry.rrelid = InvalidOid;
 
 		memset(&key, 0, sizeof(pgqsHashKey));
 		key.userid = GetUserId();
@@ -1475,11 +1462,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 				context->nentries++;
 
-				memcpy(&(entry->lrelid), &(tempentry.lrelid), sizeof(pgqsEntry) - sizeof(pgqsHashKey));
-				entry->count = 0;
-				entry->nbfiltered = 0;
-				entry->usage = 0;
-				entry->occurences = 0;
+				/* raw copy the temporary entry */
+				pgqs_entry_copy_raw(entry, &tempentry);
 				entry->position = position;
 				entry->qualnodeid = hashExpr((Expr *) expr, context, false);
 				entry->qualid = context->qualid;
@@ -1504,7 +1488,6 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 				if (pgqs_resolve_oids)
 					pgqs_fillnames((pgqsEntryWithNames *) entry);
-
 			}
 
 			entry->nbfiltered += context->nbfiltered;
@@ -1544,12 +1527,12 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 					context->uniquequalid = previous_uniquequalnodeid;
 					return false;
 				}
-				if (boolexpr->boolop == OR_EXPR)
+				else if (boolexpr->boolop == OR_EXPR)
 				{
 					context->qualid = 0;
 					context->uniquequalid = 0;
 				}
-				if (boolexpr->boolop == AND_EXPR)
+				else if (boolexpr->boolop == AND_EXPR)
 				{
 					context->uniquequalid = hashExpr((Expr *) boolexpr, context, pgqs_track_constants);
 					context->qualid = hashExpr((Expr *) boolexpr, context, false);
@@ -1664,7 +1647,6 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-
 Datum
 pg_qualstats_names(PG_FUNCTION_ARGS)
 {
@@ -1676,7 +1658,6 @@ pg_qualstats(PG_FUNCTION_ARGS)
 {
 	return pg_qualstats_common(fcinfo, false);
 }
-
 
 Datum
 pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
@@ -1728,17 +1709,15 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	rsinfo->setDesc = tupdesc;
 
 	LWLockAcquire(pgqs->lock, LW_SHARED);
-
 	hash_seq_init(&hash_seq, pgqs_hash);
 
 	if (include_names)
 		nb_columns += PGQS_NAME_COLUMNS;
 
-
 	Assert(nb_columns == tupdesc->natts);
 
 	values = palloc0(sizeof(Datum) * nb_columns);
-	nulls = palloc0(sizeof(bool) * nb_columns);;
+	nulls = palloc0(sizeof(bool) * nb_columns);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		int			i = 0;
@@ -1747,6 +1726,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		memset(nulls, 0, sizeof(bool) * nb_columns);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
+
 		if (entry->lattnum != InvalidAttrNumber)
 		{
 			values[i++] = ObjectIdGetDatum(entry->lrelid);
@@ -1926,7 +1906,6 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS)
 		return (Datum) 0;
 
 	LWLockAcquire(pgqs->querylock, LW_SHARED);
-
 	hash_seq_init(&hash_seq, pgqs_query_examples_hash);
 
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
@@ -1950,7 +1929,6 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
-
 /*
  * Calculate hash value for a key
  */
@@ -1966,7 +1944,6 @@ pgqs_hash_fn(const void *key, Size keysize)
 		hash_uint32((uint32) k->uniquequalid) ^
 		hash_uint32((uint32) k->evaltype);
 }
-
 
 static void
 pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
@@ -2106,9 +2083,9 @@ pgqs_sampled_array_size(void)
 	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
-	 * identified by their BackendId.  If need room for all possible backends, plus
-	 * autovacuum launcher and workers, plus bg workers and an extra one since
-	 * BackendId numerotation starts at 1.
+	 * identified by their BackendId.  If need room for all possible backends,
+	 * plus autovacuum launcher and workers, plus bg workers and an extra one
+	 * since BackendId numerotation starts at 1.
 	 */
 	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
 							+ max_worker_processes + 1));
