@@ -51,10 +51,15 @@ LANGUAGE C;
         oid of the relation on the right hand side
       rattnum (attnum):
         attribute number of the column on the right hand side
-      uniquequalnodeid(bigint):
+      qualid(bigint):
         hash of the parent ``AND`` expression, if any. This is useful for identifying
         predicates which are used together.
+      uniquequalid(bigint):
+        hash of the parent ``AND`` expression, if any, including the constant
+        values.
       qualnodeid(bigint):
+        the predicate hash.
+      uniquequalnodeid(bigint):
         the predicate hash. Everything (down to constants) is used to compute this hash
       occurences (bigint):
         the number of times this predicate has been seen
