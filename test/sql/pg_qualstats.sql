@@ -30,3 +30,30 @@ SELECT * FROM pgqs WHERE id = 0;
 SELECT * FROM pgqs WHERE 0 = id;
 SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
 SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
+-- index advisor
+CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
+INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;
+SELECT pg_qualstats_reset();
+SELECT * FROM adv WHERE id1 < 0;
+SELECT count(*) FROM adv WHERE id1 < 500;
+SELECT * FROM adv WHERE val = 'meh';
+SELECT * FROM adv WHERE id1 = 0 and val = 'meh';
+SELECT * FROM adv WHERE id1 = 1 and val = 'meh';
+SELECT * FROM adv WHERE id1 = 1 and id2 = 2 AND val = 'meh';
+SELECT * FROM adv WHERE id1 = 6 and id2 = 6 AND id3 = 6 AND val = 'meh';
+SELECT * FROM adv WHERE val ILIKE 'moh';
+SELECT COUNT(*) FROM pgqs WHERE id = 1;
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  ORDER BY v::text COLLATE "C";
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'unoptimised') v
+  ORDER BY v::text COLLATE "C";
+-- check quals on removed table
+DROP TABLE pgqs;
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  ORDER BY v::text COLLATE "C";

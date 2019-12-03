@@ -378,3 +378,267 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
         WHERE (qs.lrelid IS NULL) != (qs.rrelid IS NULL)
     ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, occurences, execution_count, nbfiltered, queryid
 ;
+
+CREATE OR REPLACE FUNCTION pg_qualstats_deparse_qual(qual qual) RETURNS TEXT
+AS $_$
+    SELECT pg_catalog.format('%I.%I %s ?',
+        c.oid::regclass, a.attname, o.oprname)
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+    JOIN pg_catalog.pg_operator o ON o.oid = qual.opno
+    WHERE c.oid = qual.relid
+    AND a.attnum = qual.attnum
+$_$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION pg_qualstats_get_qualnode_rel(bigint)
+RETURNS TEXT
+AS $_$
+    SELECT pg_catalog.quote_ident(n.nspname) || '.'
+      || pg_catalog.quote_ident(c.relname)
+    FROM pg_qualstats() q
+    JOIN pg_catalog.pg_class c ON coalesce(q.lrelid, q.rrelid) = c.oid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE q.qualnodeid = $1
+$_$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION pg_qualstats_get_idx_col(bigint,
+    include_nondefault_opclass boolean = true)
+RETURNS TEXT
+AS $_$
+    SELECT pg_catalog.quote_ident(a.attname) ||
+    CASE WHEN include_nondefault_opclass THEN
+      CASE WHEN opc.opcdefault THEN ''
+      ELSE ' ' || pg_catalog.quote_ident(opcname)
+      END
+    ELSE
+    ''
+    END
+    FROM pg_qualstats() q
+    JOIN pg_catalog.pg_class c ON coalesce(q.lrelid, q.rrelid) = c.oid
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+      AND a.attnum = coalesce(q.lattnum, q.rattnum)
+    JOIN pg_catalog.pg_operator op ON op.oid = q.opno
+    JOIN pg_catalog.pg_amop amop ON amop.amopopr = op.oid
+    JOIN pg_catalog.pg_am am ON am.oid = amop.amopmethod
+    JOIN pg_catalog.pg_opfamily f ON f.opfmethod = am.oid
+      AND amop.amopfamily = f.oid
+    JOIN pg_catalog.pg_opclass opc ON opc.opcfamily = f.oid
+    WHERE q.qualnodeid = $1
+    ORDER BY CASE opcdefault WHEN true THEN 0 ELSE 1 END;
+$_$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION pg_qualstats_index_advisor (
+    min_filter integer DEFAULT 1000,
+    min_selectivity integer DEFAULT 30,
+    forbidden_am text[] DEFAULT '{}')
+    RETURNS jsonb
+AS $_$
+DECLARE
+    v_res jsonb;
+    v_processed bigint[];
+    v_indexes text[];
+    v_unoptimised text[];
+
+    rec record;
+    v_nb_processed integer = 1;
+
+    v_ddl text;
+    v_col text;
+    v_cur jsonb;
+    v_qualnodeid bigint;
+    v_quals_todo bigint[];
+    v_quals_done bigint[];
+    v_quals_col_done text[];
+BEGIN
+    -- sanity checks and default values
+    SELECT coalesce(min_filter, 1000), coalesce(min_selectivity, 30),
+      coalesce(forbidden_am, '{}')
+    INTO min_filter, min_selectivity, forbidden_am;
+
+    -- don't try to generate hash indexes Before pg 10, as those are only WAL
+    -- logged since pg 11.
+    IF pg_catalog.current_setting('server_version_num')::bigint < 100000 THEN
+        forbidden_am := forbidden_am || 'hash';
+    END IF;
+
+    -- first find out unoptimizable quals
+    FOR rec IN SELECT DISTINCT qualnodeid,
+        (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
+          opno, eval_type)::qual AS qual
+      FROM pg_qualstats() q
+      JOIN pg_catalog.pg_database d ON q.dbid = d.oid
+      LEFT JOIN pg_catalog.pg_operator op ON op.oid = q.opno
+      LEFT JOIN pg_catalog.pg_amop amop ON amop.amopopr = op.oid
+      LEFT JOIN pg_catalog.pg_am am ON am.oid = amop.amopmethod
+      WHERE d.datname = current_database()
+       AND eval_type = 'f'
+       AND coalesce(lrelid, rrelid) != 0
+       AND amname IS NULL
+    LOOP
+      v_unoptimised := pg_catalog.array_append(v_unoptimised,
+        pg_qualstats_deparse_qual(rec.qual));
+      v_processed := pg_catalog.array_append(v_processed, rec.qualnodeid);
+    END LOOP;
+
+    -- The index suggestion is done in multiple iteration, by scoring for each
+    -- relation containing interesting quals a path of possibly AND-ed quals
+    -- that contains other possibly AND-ed quals.  Only the higher score path
+    -- will be used to create an index, so we can then compute another set of
+    -- paths ignoring the quals that are now optimized with an index.
+    WHILE v_nb_processed > 0 LOOP
+      v_nb_processed := 0;
+      FOR rec IN
+        -- first, find quals that seems worth to optimize along with the
+        -- possible access methods, discarding any qualnode that are marked as
+        -- already processed.  Also apply access method restriction.
+        WITH pgqs AS (
+          SELECT dbid, amname, qualid, qualnodeid,
+            (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
+            opno, eval_type)::qual AS qual,
+            round(avg(execution_count)) AS execution_count,
+            sum(occurences) AS occurences,
+            round(sum(nbfiltered)::numeric / sum(occurences)) AS avg_filter,
+            CASE WHEN sum(execution_count) = 0
+              THEN 0
+              ELSE round(sum(nbfiltered::numeric) / sum(execution_count) * 100)
+            END AS avg_selectivity
+          FROM pg_qualstats() q
+          JOIN pg_catalog.pg_database d ON q.dbid = d.oid
+          JOIN pg_catalog.pg_operator op ON op.oid = q.opno
+          JOIN pg_catalog.pg_amop amop ON amop.amopopr = op.oid
+          JOIN pg_catalog.pg_am am ON am.oid = amop.amopmethod
+          WHERE d.datname = current_database()
+          AND eval_type = 'f'
+          AND amname != ALL (forbidden_am)
+          AND coalesce(lrelid, rrelid) != 0
+          AND qualnodeid != ALL(v_processed)
+          GROUP BY dbid, amname, qualid, qualnodeid, lrelid, rrelid,
+            lattnum, rattnum, opno, eval_type
+        ),
+        -- apply cardinality and selectivity restrictions
+        filtered AS (
+          SELECT (qual).relid, amname, coalesce(qualid, qualnodeid) AS parent,
+            count(*) AS weight, array_agg(qualnodeid) AS quals
+          FROM pgqs
+          WHERE avg_filter >= min_filter
+          AND avg_selectivity >= min_selectivity
+          GROUP BY (qual).relid, amname, parent
+        ),
+        -- for each possibly AND-ed qual, build the list of included qualnodeid
+        nodes AS (
+          SELECT p.relid, p.amname, p.parent, p.quals,
+            c.quals AS children
+          FROM filtered p
+          LEFT JOIN filtered c ON p.quals @> c.quals
+            AND p.amname = c.amname
+            AND p.parent != c.parent
+            AND p.quals != c.quals
+        ),
+        -- build the "paths", which is the list of AND-ed quals that entirely
+        -- contains another possibly AND-ed quals, and give a score for each
+        -- path.  The scoring method used here is simply the number of
+        -- columns in the quals.
+        paths AS (
+          SELECT DISTINCT *, coalesce(pg_catalog.array_length(children, 1), 0) AS weight
+          FROM nodes
+          UNION
+          SELECT DISTINCT p.relid, p.amname, p.parent, p.quals, c.children,
+            coalesce(pg_catalog.array_length(c.children, 1), 0) AS weight
+          FROM nodes p
+          JOIN nodes c ON p.children @> c.quals AND c.quals IS NOT NULL
+            AND c.quals != p.quals
+            AND p.amname = c.amname
+        ),
+        -- compute the final paths.
+        -- The scoring method used here is simply the sum of total
+        -- number of columns in each possibly AND-ed quals, so that we can
+        -- later chose to create indexes that optimize as many queries as
+        -- possible with as few indexes as possible.
+        -- We also compute here an access method weight, so that we can later
+        -- choose a btree index rather than another access method if btree is
+        -- available.
+        computed AS (
+          SELECT relid, amname, parent, quals,
+            array_agg(to_json(children) ORDER BY weight)
+              FILTER (WHERE children IS NOT NULL) AS included,
+            pg_catalog.array_length(quals, 1) + sum(weight) AS path_weight,
+          CASE amname WHEN 'btree' THEN 1 ELSE 2 END AS amweight
+          FROM paths
+          GROUP BY relid, amname, parent, quals
+        ),
+        -- compute a rank for each final paths, per relation.
+        final AS (
+          SELECT relid, amname, parent, quals, included, path_weight, amweight,
+          row_number() OVER (
+            PARTITION BY relid
+            ORDER BY path_weight DESC, amweight) AS rownum
+          FROM computed
+        )
+        -- and finally choose the higher rank final path for each relation.
+        SELECT relid, amname, parent, quals, included, path_weight
+        FROM final
+        WHERE rownum = 1
+      LOOP
+        v_nb_processed := v_nb_processed + 1;
+
+        v_ddl := '';
+        v_quals_todo := '{}';
+        v_quals_done := '{}';
+        v_quals_col_done := '{}';
+
+        -- put columns from included quals, if any, first for order dependency
+        IF rec.included IS NOT NULL THEN
+          FOREACH v_cur IN ARRAY rec.included LOOP
+            FOR v_qualnodeid IN SELECT pg_catalog.jsonb_array_elements(v_cur)::bigint
+            LOOP
+              v_quals_todo := v_quals_todo || v_qualnodeid;
+            END LOOP;
+          END LOOP;
+        END IF;
+
+        -- and append qual's own columns
+        v_quals_todo := v_quals_todo || rec.quals;
+
+        -- generate the index DDL
+        FOREACH v_qualnodeid IN ARRAY v_quals_todo LOOP
+          -- skip quals already present in the index
+          CONTINUE WHEN v_quals_done @> ARRAY[v_qualnodeid];
+
+          -- skip other quals for the same column
+          v_col := pg_qualstats_get_idx_col(v_qualnodeid, false);
+          CONTINUE WHEN v_quals_col_done @> ARRAY[v_col];
+
+          -- mark this qual as present in a generated index so it's ignore at
+          -- next round of best quals to optimize
+          v_processed := pg_catalog.array_append(v_processed, v_qualnodeid);
+
+          -- mark this qual and col as present in this index
+          v_quals_done := v_quals_done || v_qualnodeid;
+          v_quals_col_done := v_quals_col_done || v_col;
+
+          -- if underlying table has been dropped, stop here
+          CONTINUE WHEN coalesce(v_col, '') = '';
+
+          -- append the column to the index
+          IF v_ddl != '' THEN v_ddl := v_ddl || ', '; END IF;
+          v_ddl := v_ddl || pg_qualstats_get_idx_col(v_qualnodeid, true);
+        END LOOP;
+
+        -- if underlying table has been dropped, skip this (broken) index
+        CONTINUE WHEN coalesce(v_ddl, '') = '';
+
+        -- generate the full CREATE INDEX ddl
+        v_ddl = pg_catalog.format('CREATE INDEX ON %s USING %I (%s)',
+          pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
+
+        -- and append it to the list of generated indexes
+        v_indexes := v_indexes || v_ddl;
+      END LOOP;
+    END LOOP;
+
+    v_res := pg_catalog.jsonb_build_object('indexes', v_indexes,
+        'unoptimised', v_unoptimised);
+
+    RETURN v_res;
+END;
+$_$ LANGUAGE plpgsql;

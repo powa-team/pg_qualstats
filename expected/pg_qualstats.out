@@ -118,3 +118,91 @@ SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
      1
 (1 row)
 
+-- index advisor
+CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
+INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;
+SELECT pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+SELECT * FROM adv WHERE id1 < 0;
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT count(*) FROM adv WHERE id1 < 500;
+ count 
+-------
+   499
+(1 row)
+
+SELECT * FROM adv WHERE val = 'meh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT * FROM adv WHERE id1 = 0 and val = 'meh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT * FROM adv WHERE id1 = 1 and val = 'meh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT * FROM adv WHERE id1 = 1 and id2 = 2 AND val = 'meh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT * FROM adv WHERE id1 = 6 and id2 = 6 AND id3 = 6 AND val = 'meh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT * FROM adv WHERE val ILIKE 'moh';
+ id1 | id2 | id3 | val 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT COUNT(*) FROM pgqs WHERE id = 1;
+ count 
+-------
+     1
+(1 row)
+
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  ORDER BY v::text COLLATE "C";
+                               v                               
+---------------------------------------------------------------
+ "CREATE INDEX ON public.adv USING btree (id1)"
+ "CREATE INDEX ON public.adv USING btree (val, id1, id2, id3)"
+ "CREATE INDEX ON public.pgqs USING btree (id)"
+(3 rows)
+
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'unoptimised') v
+  ORDER BY v::text COLLATE "C";
+        v        
+-----------------
+ "adv.val ~~* ?"
+(1 row)
+
+-- check quals on removed table
+DROP TABLE pgqs;
+SELECT v
+  FROM jsonb_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  ORDER BY v::text COLLATE "C";
+                               v                               
+---------------------------------------------------------------
+ "CREATE INDEX ON public.adv USING btree (id1)"
+ "CREATE INDEX ON public.adv USING btree (val, id1, id2, id3)"
+(2 rows)
+
