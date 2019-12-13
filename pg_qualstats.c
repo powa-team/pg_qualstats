@@ -24,6 +24,7 @@
  *-------------------------------------------------------------------------
  */
 #include <limits.h>
+#include <math.h>
 #include "postgres.h"
 #include "access/hash.h"
 #include "access/htup_details.h"
@@ -68,7 +69,7 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 18			/* number of columns in pg_qualstats  SRF */
+#define PGQS_COLUMNS 26			/* number of columns in pg_qualstats  SRF */
 #define PGQS_NAME_COLUMNS 7		/* number of column added when using
 								 * pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
@@ -78,6 +79,9 @@ PG_MODULE_MAGIC;
 #define PGQS_CONSTANT_SIZE 80	/* Truncate constant representation at 80 */
 
 #define PGQS_FLAGS (INSTRUMENT_ROWS|INSTRUMENT_BUFFERS)
+
+#define PGQS_RATIO	0
+#define PGQS_NUM	1
 
 /*---- Function declarations ----*/
 
@@ -132,6 +136,8 @@ static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
 static bool pgqs_track_constants;
 static double pgqs_sample_rate;
+static int	pgqs_min_err_ratio;
+static int	pgqs_min_err_num;
 static int	query_is_sampled;	/* Is the current query sampled, per backend */
 static int	nesting_level = 0;	/* Current nesting depth of ExecutorRun calls */
 static bool pgqs_assign_sample_rate_check_hook(double *newval, void **extra, GucSource source);
@@ -212,7 +218,12 @@ typedef struct pgqsEntry
 	int64		nbfiltered;		/* # of lines discarded by the operator */
 	int			position;		/* content position in query text */
 	double		usage;			/* # of qual execution, used for deallocation */
-	int64		occurences;
+	double		min_err_estim[2];	/* min estimation error ratio and num */
+	double		max_err_estim[2];	/* max estimation error ratio and num */
+	double		mean_err_estim[2];	/* mean estimation error ratio and num */
+	double		sum_err_estim[2];	/* sum of variances in estimation error
+									 * ratio and num */
+	int64		occurences;		/* # of qual execution, 1 per query */
 } pgqsEntry;
 
 typedef struct pgqsEntryWithNames
@@ -255,6 +266,7 @@ typedef struct pgqsWalkerContext
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	int64		count;
 	int64		nbfiltered;
+	double		err_estim[2];
 	int			nentries;		/* number of entries found so far */
 	char		evaltype;
 	const char *querytext;
@@ -277,6 +289,7 @@ static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext *context);
 static void pgqs_entry_dealloc(void);
 static inline void pgqs_entry_init(pgqsEntry *entry);
 static inline void pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src);
+static void pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurences);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_localentry_dealloc(int nvictims);
 static void pgqs_fillnames(pgqsEntryWithNames *entry);
@@ -384,6 +397,32 @@ _PG_init(void)
 							 PGC_USERSET,
 							 0,
 							 pgqs_assign_sample_rate_check_hook,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("pg_qualstats.min_err_estimate_ratio",
+							 "Error estimation ratio threshold to save quals",
+							 NULL,
+							 &pgqs_min_err_ratio,
+							 0,
+							 0,
+							 INT_MAX,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomIntVariable("pg_qualstats.min_err_estimate_num",
+							 "Error estimation num threshold to save quals",
+							 NULL,
+							 &pgqs_min_err_num,
+							 0,
+							 0,
+							 INT_MAX,
+							 PGC_USERSET,
+							 0,
+							 NULL,
 							 NULL,
 							 NULL);
 
@@ -741,7 +780,9 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					newEntry->count += localentry->count;
 					newEntry->nbfiltered += localentry->nbfiltered;
 					newEntry->usage += localentry->usage;
-					newEntry->occurences += localentry->occurences;
+					/* compute estimation error min, max, mean and variance */
+					pgqs_entry_err_estim(newEntry, localentry->mean_err_estim,
+							localentry->occurences);
 				}
 				/* cleanup local hash */
 				hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
@@ -838,6 +879,42 @@ pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src)
 }
 
 /*
+ * Accurately compute estimation error ratio and num variance using Welford's
+ * method. See <http://www.johndcook.com/blog/standard_deviation/>
+ * Also maintain min and max values.
+ */
+static void
+pgqs_entry_err_estim(pgqsEntry *e, double err_estim[2], int64 occurences)
+{
+	e->occurences += occurences;
+
+	for (int i = 0; i < 2; i++)
+	{
+		if ((e->occurences - occurences) == 0)
+		{
+			e->min_err_estim[i] = err_estim[i];
+			e->max_err_estim[i] = err_estim[i];
+			e->mean_err_estim[i] = err_estim[i];
+		}
+		else
+		{
+			double old_err = e->mean_err_estim[i];
+
+			e->mean_err_estim[i] +=
+				(err_estim[i] - old_err) / e->occurences;
+			e->sum_err_estim[i] +=
+				(err_estim[i] - old_err) * (err_estim[i] - e->mean_err_estim[i]);
+		}
+
+		/* calculate min/max counters */
+		if (e->min_err_estim[i] > err_estim[i])
+			e->min_err_estim[i] = err_estim[i];
+		if (e->max_err_estim[i] < err_estim[i])
+			e->max_err_estim[i] = err_estim[i];
+	}
+}
+
+/*
  * Deallocate the first example query.
  * Caller must hold an exlusive lock on pgqs->querylock
  */
@@ -908,6 +985,8 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	Instrumentation *instrument = planstate->instrument;
 	int64		oldcount = context->count;
 	double		oldfiltered = context->nbfiltered;
+	double		old_err_ratio = context->err_estim[PGQS_RATIO];
+	double		old_err_num = context->err_estim[PGQS_NUM];
 	double		total_filtered = 0;
 	ListCell   *lc;
 	List	   *parent = 0;
@@ -976,18 +1055,47 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	context->nbfiltered = total_filtered;
 	context->count = instrument->tuplecount + instrument->ntuples + total_filtered;
 
-	/* Add the indexquals */
-	context->evaltype = 'i';
-	expression_tree_walker((Node *) indexquals, pgqs_whereclause_tree_walker, context);
+	if (plan->plan_rows == instrument->ntuples)
+	{
+		context->err_estim[PGQS_RATIO] = 0;
+		context->err_estim[PGQS_NUM] = 0;
+	}
+	else if (plan->plan_rows > instrument->ntuples)
+	{
+		/* XXX should use use a bigger value? */
+		if (instrument->ntuples == 0)
+			context->err_estim[PGQS_RATIO] = plan->plan_rows * 1.0L;
+		else
+			context->err_estim[PGQS_RATIO] = plan->plan_rows * 1.0L / instrument->ntuples;
+		context->err_estim[PGQS_NUM] = plan->plan_rows - instrument->ntuples;
+	}
+	else
+	{
+		/* plan_rows cannot be zero */
+		context->err_estim[PGQS_RATIO] = instrument->ntuples * 1.0L / plan->plan_rows;
+		context->err_estim[PGQS_NUM] = instrument->ntuples - plan->plan_rows;
+	}
 
-	/* Add the generic quals */
-	context->evaltype = 'f';
-	expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker, context);
+	if ( context->err_estim[PGQS_RATIO] >= pgqs_min_err_ratio &&
+			context->err_estim[PGQS_NUM] >= pgqs_min_err_num)
+	{
+		/* Add the indexquals */
+		context->evaltype = 'i';
+		expression_tree_walker((Node *) indexquals,
+				pgqs_whereclause_tree_walker, context);
+
+		/* Add the generic quals */
+		context->evaltype = 'f';
+		expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker,
+				context);
+	}
 
 	context->qualid = 0;
 	context->uniquequalid = 0;
 	context->count = oldcount;
 	context->nbfiltered = oldfiltered;
+	context->err_estim[PGQS_RATIO] = old_err_ratio;
+	context->err_estim[PGQS_NUM] = old_err_num;
 
 	foreach(lc, planstate->initPlan)
 	{
@@ -1211,7 +1319,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 	entry->nbfiltered += context->nbfiltered;
 	entry->count += context->count;
 	entry->usage += 1;
-	entry->occurences += 1;
+	/* compute estimation error min, max, mean and variance */
+	pgqs_entry_err_estim(entry, context->err_estim, 1);
 
 	return entry;
 }
@@ -1545,7 +1654,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 			entry->nbfiltered += context->nbfiltered;
 			entry->count += context->count;
 			entry->usage += 1;
-			entry->occurences += 1;
+			/* compute estimation error min, max, mean and variance */
+			pgqs_entry_err_estim(entry, context->err_estim, 1);
 
 			return entry;
 		}
@@ -1773,6 +1883,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		int			i = 0;
+		double		stddev_estim[2];
 
 		memset(values, 0, sizeof(Datum) * nb_columns);
 		memset(nulls, 0, sizeof(bool) * nb_columns);
@@ -1815,6 +1926,26 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = Int64GetDatum(entry->occurences);
 		values[i++] = Int64GetDatum(entry->count);
 		values[i++] = Int64GetDatum(entry->nbfiltered);
+
+		for (int j = 0; j < 2; j++)
+		{
+			if (j == PGQS_RATIO) /* min/max ratio are double precision */
+			{
+				values[i++] = Float8GetDatum(entry->min_err_estim[j]);
+				values[i++] = Float8GetDatum(entry->max_err_estim[j]);
+			}
+			else /* min/max num are bigint */
+			{
+				values[i++] = Int64GetDatum(entry->min_err_estim[j]);
+				values[i++] = Int64GetDatum(entry->max_err_estim[j]);
+			}
+			values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
+			if (entry->occurences > 1)
+				stddev_estim[j] = sqrt(entry->sum_err_estim[j] / entry->occurences);
+			else
+				stddev_estim[j] = 0.0;
+			values[i++] = Float8GetDatumFast(stddev_estim[j]);
+		}
 
 		if (entry->position == -1)
 			nulls[i++] = true;

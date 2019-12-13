@@ -62,6 +62,22 @@ LANGUAGE C;
         the total number of execution of this predicate.
       nbfiltered (bigint):
         the number of lines filtered by this predicate
+      min_err_estimate_ratio(double precision):
+        the minimum selectivity estimation error ratio for this predicate
+      max_err_estimate_ratio(double precision):
+        the maximum selectivity estimation error ratio for this predicate
+      mean_err_estimate_ratio(double precision):
+        the mean selectivity estimation error ratio for this predicate
+      stddev_err_estimate_ratio(double precision):
+        the standard deviation for selectivity estimation error ratio for this predicate
+      min_err_estimate_num(bigint):
+        the minimum number of line for selectivity estimation error for this predicate
+      max_err_estimate_num(bigint):
+        the maximum number of line for selectivity estimation error for this predicate
+      mean_err_estimate_num(double precision):
+        the mean number of line for selectivity estimation error for this predicate
+      stddev_err_estimate_num(double precision):
+        the standard deviation for number of line for selectivity estimation error for this predicate
       constant_position (int):
         the position of the constant in the original query, as filled by the lexer.
       queryid (bigint):
@@ -81,24 +97,32 @@ LANGUAGE C;
       powa=# select * from powa_statements where queryid != 2;
       powa=# select * from pg_qualstats();
       -[ RECORD 1 ]-----+-----------
-      userid            | 16384
-      dbid              | 850774
-      lrelid            | 851367
-      lattnum           | 1
-      opno              | 417
-      rrelid            |
-      rattnum           |
-      qualid            |
-      uniquequalid      |
-      qualnodeid        | 1711571257
-      uniquequalnodeid  | 466568149
-      occurences        | 1
-      execution_count   | 1206
-      nbfiltered        | 0
-      constant_position | 47
-      queryid           | 3644521490
-      constvalue        | 2::integer
-      eval_type         | f
+      userid                    | 10
+      dbid                      | 32799
+      lrelid                    | 189341
+      lattnum                   | 2
+      opno                      | 417
+      rrelid                    |
+      rattnum                   |
+      qualid                    |
+      uniquequalid              |
+      qualnodeid                | 1391544855
+      uniquequalnodeid          | 551979005
+      occurences                | 1
+      execution_count           | 31
+      nbfiltered                | 0
+      min_err_estimate_ratio    | 32.741935483871
+      max_err_estimate_ratio    | 32.741935483871
+      mean_err_estimate_ratio   | 32.741935483871
+      stddev_err_estimate_ratio | 0
+      min_err_estimate_num      | 984
+      max_err_estimate_num      | 984
+      mean_err_estimate_num     | 984
+      stddev_err_estimate_num   | 0
+      constant_position         | 47
+      queryid                   | -6668685762776610659
+      constvalue                | 2::integer
+      eval_type                 | f
 */
 CREATE FUNCTION pg_qualstats(
   OUT userid oid,
@@ -115,6 +139,14 @@ CREATE FUNCTION pg_qualstats(
   OUT occurences bigint,
   OUT execution_count bigint,
   OUT nbfiltered bigint,
+  OUT min_err_estimate_ratio double precision,
+  OUT max_err_estimate_ratio double precision,
+  OUT mean_err_estimate_ratio double precision,
+  OUT stddev_err_estimate_ratio double precision,
+  OUT min_err_estimate_num bigint,
+  OUT max_err_estimate_num bigint,
+  OUT mean_err_estimate_num double precision,
+  OUT stddev_err_estimate_num double precision,
   OUT constant_position int,
   OUT queryid    bigint,
   OUT constvalue varchar,
