@@ -1305,6 +1305,48 @@ get_const_expr(Const *constval, StringInfo buf)
 
 }
 
+/*-----------
+ * In order to avoid duplicated entries for sementically equivalent OpExpr,
+ * this function returns a canonical version of the given OpExpr.
+ *
+ * For now, the only modification is for OpExpr with a Var and a Const, we
+ * prefer the form:
+ * Var operator Const
+ * with the Var on the LHS.  If the expression in the opposite form and the
+ * operator has a commutator, we'll commute it, otherwise fallback to the
+ * original OpExpr with the Var on the RHS.
+ * OpExpr of the form Var operator Var can still be redundant.
+ */
+static OpExpr *
+pgqs_get_canonical_opexpr(OpExpr *expr, bool *commuted)
+{
+	if (commuted)
+		*commuted = false;
+
+	/* Only OpExpr with 2 arguments needs special processing. */
+	if (list_length(expr->args) != 2)
+		return expr;
+
+	/* If the 1st argument is a Var, nothing is done */
+	if (IsA(linitial(expr->args), Var))
+		return expr;
+
+	/* If the 2nd argument is a Var, commute the OpExpr if possible */
+	if (IsA(lsecond(expr->args), Var) && OidIsValid(get_commutator(expr->opno)))
+	{
+		OpExpr *new = copyObject(expr);
+
+		CommuteOpExpr(new);
+
+		if (commuted)
+			*commuted = true;
+
+		return new;
+	}
+
+	return expr;
+}
+
 static pgqsEntry *
 pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 {
@@ -1314,12 +1356,13 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 	if (list_length(expr->args) == 2)
 	{
-		Node	   *node = linitial(expr->args);
-		Var		   *var = NULL;
-		Const	   *constant = NULL;
+		bool		save_qual;
+		Node	   *node;
+		Var		   *var;
+		Const	   *constant;
 		bool		found;
-		Oid		   *sreliddest = NULL;
-		AttrNumber *sattnumdest = NULL;
+		Oid		   *sreliddest;
+		AttrNumber *sattnumdest;
 		int			position = -1;
 		StringInfo	buf = makeStringInfo();
 		pgqsHashKey key;
@@ -1337,75 +1380,92 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		key.queryid = context->queryId;
 		key.evaltype = context->evaltype;
 
-		if (IsA(node, RelabelType))
-			node = (Node *) ((RelabelType *) node)->arg;
+		save_qual = false;
+		var = NULL;			/* will store the last Var found, if any */
+		constant = NULL;	/* will store the last Constant found, if any */
 
-		if (IsA(node, Var))
-			node = (Node *) pgqs_resolve_var((Var *) node, context);
+		/* setup the node and LHS destination fields for the 1st argument */
+		node =  linitial(expr->args);
+		sreliddest = &(tempentry.lrelid);
+		sattnumdest = &(tempentry.lattnum);
 
-		switch (node->type)
+		for (int step = 0; step < 2; step++)
 		{
-			case T_Var:
-				var = (Var *) node;
-				{
-					RangeTblEntry *rte;
+			if (IsA(node, RelabelType))
+				node = (Node *) ((RelabelType *) node)->arg;
 
-					rte = list_nth(context->rtable, var->varno - 1);
-					if (rte->rtekind == RTE_RELATION)
+			if (IsA(node, Var))
+				node = (Node *) pgqs_resolve_var((Var *) node, context);
+
+			switch (node->type)
+			{
+				case T_Var:
+					var = (Var *) node;
 					{
-						tempentry.lrelid = rte->relid;
-						tempentry.lattnum = var->varattno;
+						RangeTblEntry *rte;
+
+						rte = list_nth(context->rtable, var->varno - 1);
+						if (rte->rtekind == RTE_RELATION)
+						{
+							save_qual = true;
+							*sreliddest = rte->relid;
+							*sattnumdest = var->varattno;
+						}
+						else
+							var = NULL;
+					}
+					break;
+				case T_Const:
+					constant = (Const *) node;
+					break;
+				default:
+					break;
+			}
+
+			/* find the node to process for the 2nd pass */
+			if (step == 0)
+			{
+				node = NULL;
+
+				if (var == NULL)
+				{
+					bool commuted;
+					OpExpr *new = pgqs_get_canonical_opexpr(expr, &commuted);
+
+					/*
+					 * If the OpExpr was commuted we have to use the 1st
+					 * argument of the new OpExpr, and keep using the LHS as
+					 * destination fields.
+					 */
+					if (commuted)
+					{
+						Assert(sreliddest == &(tempentry.lrelid));
+						Assert(sattnumdest == &(tempentry.lattnum));
+
+						node = linitial(new->args);
 					}
 				}
-				break;
-			case T_Const:
-				constant = (Const *) node;
-				break;
-			default:
-				break;
-		}
-		/* If the operator can be commuted, look at it */
-		if (var == NULL)
-		{
-			if (OidIsValid(get_commutator(expr->opno)))
-			{
-				OpExpr	   *temp = copyObject(expr);
 
-				CommuteOpExpr(temp);
-				node = linitial(temp->args);
-				sreliddest = &(tempentry.lrelid);
-				sattnumdest = &(tempentry.lattnum);
+				/*
+				 * If the 1st argument was a var, or if it wasn't and the
+				 * operator couldn't be commuted, use the 2nd argument and the
+				 * RHS as destination fields.
+				 */
+				if (node == NULL)
+				{
+					/* simply process the next argument */
+					node = lsecond(expr->args);
+					/*
+					 * a Var was found and stored on the LHS, so if the next
+					 * node  will be stored on the RHS
+					 */
+					sreliddest = &(tempentry.rrelid);
+					sattnumdest = &(tempentry.rattnum);
+				}
 			}
 		}
-		else
-		{
 
-			node = lsecond(expr->args);
-			sreliddest = &(tempentry.rrelid);
-			sattnumdest = &(tempentry.rattnum);
-		}
-		if (IsA(node, Var))
-			node = (Node *) pgqs_resolve_var((Var *) node, context);
-
-
-		switch (node->type)
-		{
-			case T_Var:
-				var = (Var *) node;
-				{
-					RangeTblEntry *rte = list_nth(context->rtable, var->varno - 1);
-
-					*sreliddest = rte->relid;
-					*sattnumdest = var->varattno;
-				}
-				break;
-			case T_Const:
-				constant = (Const *) node;
-				break;
-			default:
-				break;
-		}
-		if (var != NULL)
+		if (save_qual)
 		{
 			pgqsEntry  *entry;
 
@@ -1415,37 +1475,29 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 			 */
 			if (!pgqs_track_pgcatalog)
 			{
-				HeapTuple	tp;
+				Oid nsp;
 
 				if (tempentry.lrelid != InvalidOid)
 				{
-					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.lrelid));
-					if (!HeapTupleIsValid(tp))
-						elog(ERROR, "Invalid reloid");
+					nsp = get_rel_namespace(tempentry.lrelid);
 
-					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
-					{
-						ReleaseSysCache(tp);
+					Assert(OidIsValid(nsp));
+
+					if (nsp == PG_CATALOG_NAMESPACE)
 						return NULL;
-					}
-
-					ReleaseSysCache(tp);
 				}
+
 				if (tempentry.rrelid != InvalidOid)
 				{
-					tp = SearchSysCache1(RELOID, ObjectIdGetDatum(tempentry.rrelid));
-					if (!HeapTupleIsValid(tp))
-						elog(ERROR, "Invalid reloid");
+					nsp = get_rel_namespace(tempentry.rrelid);
 
-					if (((Form_pg_class) GETSTRUCT(tp))->relnamespace == PG_CATALOG_NAMESPACE)
-					{
-						ReleaseSysCache(tp);
+					Assert(OidIsValid(nsp));
+
+					if (nsp == PG_CATALOG_NAMESPACE)
 						return NULL;
-					}
-
-					ReleaseSysCache(tp);
 				}
 			}
+
 			if (constant != NULL && pgqs_track_constants)
 			{
 				get_const_expr(constant, buf);
@@ -2122,9 +2174,15 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include
 
 			break;
 		case T_OpExpr:
-			appendStringInfo(buffer, "%d", ((OpExpr *) expr)->opno);
-			exprRepr((Expr *) ((OpExpr *) expr)->args, buffer, context, include_const);
+		{
+			OpExpr *opexpr;
+
+			opexpr = pgqs_get_canonical_opexpr((OpExpr *) expr, NULL);
+
+			appendStringInfo(buffer, "%d", opexpr->opno);
+			exprRepr((Expr *) opexpr->args, buffer, context, include_const);
 			break;
+		}
 		case T_Var:
 			{
 				Var		   *var = (Var *) expr;

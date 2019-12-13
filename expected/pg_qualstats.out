@@ -1,7 +1,7 @@
 CREATE EXTENSION pg_qualstats;
 -- Make sure sure we'll see at least one qual
 SET pg_qualstats.sample_rate = 1;
-CREATE TABLE pgqs AS SELECT id FROM generate_series(1, 100) id;
+CREATE TABLE pgqs AS SELECT id, 'a' val FROM generate_series(1, 100) id;
 SELECT COUNT(*) FROM pgqs WHERE id = 1;
  count 
 -------
@@ -44,5 +44,77 @@ SELECT COUNT(*) FROM pg_qualstats();
  count 
 -------
      0
+(1 row)
+
+-- OpExpr sanity checks
+-- subquery_var operator const, shouldn't be tracked
+SELECT * FROM (SELECT * FROM pgqs LIMIT 0) pgqs WHERE pgqs.id = 0;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT COUNT(*) FROM pg_qualstats();
+ count 
+-------
+     0
+(1 row)
+
+-- const non_commutable_operator var, should be tracked, var found on RHS
+SELECT * FROM pgqs WHERE 'somevalue' ^@ val;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
+ lrelid | lattnum | rrelid | rattnum 
+--------+---------+--------+---------
+        |         | pgqs   |       2
+(1 row)
+
+SELECT pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+-- opexpr operator var and commuted, shouldn't be tracked
+SELECT * FROM pgqs WHERE id % 2 = 3;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT * FROM pgqs WHERE 3 = id % 2;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT COUNT(*) FROM pg_qualstats();
+ count 
+-------
+     0
+(1 row)
+
+-- same query with handled commuted qual, which should be found as identical
+SELECT * FROM pgqs WHERE id = 0;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT * FROM pgqs WHERE 0 = id;
+ id | val 
+----+-----
+(0 rows)
+
+SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
+ lrelid | lattnum | rrelid | rattnum 
+--------+---------+--------+---------
+ pgqs   |       1 |        |        
+ pgqs   |       1 |        |        
+(2 rows)
+
+SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
+ count 
+-------
+     1
 (1 row)
 
