@@ -118,6 +118,27 @@ SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
      1
 (1 row)
 
+-- (unique)qualid behavior
+SELECT pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+-- There should be one group of 2 AND-ed quals, and 1 qual alone
+SELECT COUNT(*) FROM pgqs WHERE (id = 1) OR (id > 10 AND id < 20);
+ count 
+-------
+    10
+(1 row)
+
+SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*) FROM pg_qualstats() GROUP BY 1 ORDER BY 2 DESC;
+  kind  | count 
+--------+-------
+ AND-ed |     2
+ OR-ed  |     1
+(2 rows)
+
 -- index advisor
 CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
 INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;

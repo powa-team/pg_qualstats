@@ -30,6 +30,11 @@ SELECT * FROM pgqs WHERE id = 0;
 SELECT * FROM pgqs WHERE 0 = id;
 SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
 SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
+-- (unique)qualid behavior
+SELECT pg_qualstats_reset();
+-- There should be one group of 2 AND-ed quals, and 1 qual alone
+SELECT COUNT(*) FROM pgqs WHERE (id = 1) OR (id > 10 AND id < 20);
+SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*) FROM pg_qualstats() GROUP BY 1 ORDER BY 2 DESC;
 -- index advisor
 CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
 INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;

@@ -1469,25 +1469,12 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		Node	   *node;
 		Var		   *var;
 		Const	   *constant;
-		bool		found;
 		Oid		   *sreliddest;
 		AttrNumber *sattnumdest;
-		int			position = -1;
-		StringInfo	buf = makeStringInfo();
-		pgqsHashKey key;
-
 		pgqsEntry	tempentry;
 
 		pgqs_entry_init(&tempentry);
 		tempentry.opoid = expr->opno;
-
-		memset(&key, 0, sizeof(pgqsHashKey));
-		key.userid = GetUserId();
-		key.dbid = MyDatabaseId;
-		key.uniquequalid = context->uniquequalid;
-		key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
-		key.queryid = context->queryId;
-		key.evaltype = context->evaltype;
 
 		save_qual = false;
 		var = NULL;				/* will store the last Var found, if any */
@@ -1577,7 +1564,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 		if (save_qual)
 		{
+			pgqsHashKey key;
 			pgqsEntry  *entry;
+			StringInfo	buf = makeStringInfo();
+			bool		found;
+			int			position = -1;
 
 			/*
 			 * If we don't track rels in the pg_catalog schema, lookup the
@@ -1613,6 +1604,14 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				get_const_expr(constant, buf);
 				position = constant->location;
 			}
+
+			memset(&key, 0, sizeof(pgqsHashKey));
+			key.userid = GetUserId();
+			key.dbid = MyDatabaseId;
+			key.uniquequalid = context->uniquequalid;
+			key.uniquequalnodeid = hashExpr((Expr *) expr, context, pgqs_track_constants);
+			key.queryid = context->queryId;
+			key.evaltype = context->evaltype;
 
 			/* local hash, no lock needed */
 			entry = (pgqsEntry *) hash_search(pgqs_localhash, &key, HASH_ENTER,
