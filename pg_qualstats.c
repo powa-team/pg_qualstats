@@ -180,7 +180,7 @@ typedef struct pgqsHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	pgqs_queryid		queryid;	/* query identifier (if set by another plugin */
+	pgqs_queryid queryid;		/* query identifier (if set by another plugin */
 	uint32		uniquequalnodeid;	/* Hash of the const */
 	uint32		uniquequalid;	/* Hash of the parent, including the consts */
 	char		evaltype;		/* Evaluation type. Can be 'f' to mean a qual
@@ -254,7 +254,7 @@ typedef struct pgqsQueryStringEntry
  */
 typedef struct pgqsWalkerContext
 {
-	pgqs_queryid		queryId;
+	pgqs_queryid queryId;
 	List	   *rtable;
 	PlanState  *planstate;
 	PlanState  *inner_planstate;
@@ -401,30 +401,30 @@ _PG_init(void)
 							 NULL);
 
 	DefineCustomIntVariable("pg_qualstats.min_err_estimate_ratio",
-							 "Error estimation ratio threshold to save quals",
-							 NULL,
-							 &pgqs_min_err_ratio,
-							 0,
-							 0,
-							 INT_MAX,
-							 PGC_USERSET,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
+							"Error estimation ratio threshold to save quals",
+							NULL,
+							&pgqs_min_err_ratio,
+							0,
+							0,
+							INT_MAX,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
 
 	DefineCustomIntVariable("pg_qualstats.min_err_estimate_num",
-							 "Error estimation num threshold to save quals",
-							 NULL,
-							 &pgqs_min_err_num,
-							 0,
-							 0,
-							 INT_MAX,
-							 PGC_USERSET,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
+							"Error estimation num threshold to save quals",
+							NULL,
+							&pgqs_min_err_num,
+							0,
+							0,
+							INT_MAX,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
 
 	EmitWarningsOnPlaceholders("pg_qualstats");
 
@@ -782,7 +782,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					newEntry->usage += localentry->usage;
 					/* compute estimation error min, max, mean and variance */
 					pgqs_entry_err_estim(newEntry, localentry->mean_err_estim,
-							localentry->occurences);
+										 localentry->occurences);
 				}
 				/* cleanup local hash */
 				hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
@@ -898,7 +898,7 @@ pgqs_entry_err_estim(pgqsEntry *e, double err_estim[2], int64 occurences)
 		}
 		else
 		{
-			double old_err = e->mean_err_estim[i];
+			double		old_err = e->mean_err_estim[i];
 
 			e->mean_err_estim[i] +=
 				(err_estim[i] - old_err) / e->occurences;
@@ -929,7 +929,7 @@ pgqs_queryentry_dealloc(void)
 
 	if (entry != NULL)
 		hash_search_with_hash_value(pgqs_query_examples_hash, &entry->key,
-				entry->key.queryid, HASH_REMOVE, NULL);
+									entry->key.queryid, HASH_REMOVE, NULL);
 
 	hash_seq_term(&hash_seq);
 }
@@ -1076,18 +1076,18 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 		context->err_estim[PGQS_NUM] = instrument->ntuples - plan->plan_rows;
 	}
 
-	if ( context->err_estim[PGQS_RATIO] >= pgqs_min_err_ratio &&
-			context->err_estim[PGQS_NUM] >= pgqs_min_err_num)
+	if (context->err_estim[PGQS_RATIO] >= pgqs_min_err_ratio &&
+		context->err_estim[PGQS_NUM] >= pgqs_min_err_num)
 	{
 		/* Add the indexquals */
 		context->evaltype = 'i';
 		expression_tree_walker((Node *) indexquals,
-				pgqs_whereclause_tree_walker, context);
+							   pgqs_whereclause_tree_walker, context);
 
 		/* Add the generic quals */
 		context->evaltype = 'f';
 		expression_tree_walker((Node *) quals, pgqs_whereclause_tree_walker,
-				context);
+							   context);
 	}
 
 	context->qualid = 0;
@@ -1443,7 +1443,7 @@ pgqs_get_canonical_opexpr(OpExpr *expr, bool *commuted)
 	/* If the 2nd argument is a Var, commute the OpExpr if possible */
 	if (IsA(lsecond(expr->args), Var) && OidIsValid(get_commutator(expr->opno)))
 	{
-		OpExpr *new = copyObject(expr);
+		OpExpr	   *new = copyObject(expr);
 
 		CommuteOpExpr(new);
 
@@ -1490,11 +1490,11 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		key.evaltype = context->evaltype;
 
 		save_qual = false;
-		var = NULL;			/* will store the last Var found, if any */
-		constant = NULL;	/* will store the last Constant found, if any */
+		var = NULL;				/* will store the last Var found, if any */
+		constant = NULL;		/* will store the last Constant found, if any */
 
 		/* setup the node and LHS destination fields for the 1st argument */
-		node =  linitial(expr->args);
+		node = linitial(expr->args);
 		sreliddest = &(tempentry.lrelid);
 		sattnumdest = &(tempentry.lattnum);
 
@@ -1538,8 +1538,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 
 				if (var == NULL)
 				{
-					bool commuted;
-					OpExpr *new = pgqs_get_canonical_opexpr(expr, &commuted);
+					bool		commuted;
+					OpExpr	   *new = pgqs_get_canonical_opexpr(expr, &commuted);
 
 					/*
 					 * If the OpExpr was commuted we have to use the 1st
@@ -1564,6 +1564,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				{
 					/* simply process the next argument */
 					node = lsecond(expr->args);
+
 					/*
 					 * a Var was found and stored on the LHS, so if the next
 					 * node  will be stored on the RHS
@@ -1584,7 +1585,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 			 */
 			if (!pgqs_track_pgcatalog)
 			{
-				Oid nsp;
+				Oid			nsp;
 
 				if (tempentry.lrelid != InvalidOid)
 				{
@@ -1618,8 +1619,8 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 											  &found);
 			if (!found)
 			{
-				char   *utf8const;
-				int		len;
+				char	   *utf8const;
+				int			len;
 
 				context->nentries++;
 
@@ -1630,9 +1631,9 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				entry->qualid = context->qualid;
 
 				utf8const = (char *) pg_do_encoding_conversion((unsigned char *) buf->data,
-																strlen(buf->data),
-																GetDatabaseEncoding(),
-																PG_UTF8);
+															   strlen(buf->data),
+															   GetDatabaseEncoding(),
+															   PG_UTF8);
 				len = strlen(utf8const);
 
 				/*
@@ -1642,7 +1643,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				 * converted to this encoding.
 				 */
 				len = pg_encoding_mbcliplen(PG_UTF8, utf8const, len,
-						PGQS_CONSTANT_SIZE - 1);
+											PGQS_CONSTANT_SIZE - 1);
 
 				memcpy(entry->constvalue, utf8const, len);
 				entry->constvalue[len] = '\0';
@@ -1733,7 +1734,7 @@ pgqs_shmem_startup(void)
 #if PG_VERSION_NUM >= 90600
 							+ pgqs_sampled_array_size()
 #endif
-						   ),
+							),
 						   &found);
 	memset(&info, 0, sizeof(info));
 	memset(&queryinfo, 0, sizeof(queryinfo));
@@ -1929,12 +1930,12 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 
 		for (int j = 0; j < 2; j++)
 		{
-			if (j == PGQS_RATIO) /* min/max ratio are double precision */
+			if (j == PGQS_RATIO)	/* min/max ratio are double precision */
 			{
 				values[i++] = Float8GetDatum(entry->min_err_estim[j]);
 				values[i++] = Float8GetDatum(entry->max_err_estim[j]);
 			}
-			else /* min/max num are bigint */
+			else				/* min/max num are bigint */
 			{
 				values[i++] = Int64GetDatum(entry->min_err_estim[j]);
 				values[i++] = Int64GetDatum(entry->max_err_estim[j]);
@@ -2018,11 +2019,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 Datum
 pg_qualstats_example_query(PG_FUNCTION_ARGS)
 {
-    #if PG_VERSION_NUM >= 110000
+#if PG_VERSION_NUM >= 110000
 	pgqs_queryid queryid = PG_GETARG_INT64(0);
-    #else
+#else
 	pgqs_queryid queryid = PG_GETARG_UINT32(0);
-    #endif
+#endif
 	pgqsQueryStringEntry *entry;
 	pgqsQueryStringHashKey queryKey;
 	bool		found;
@@ -2305,15 +2306,15 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include
 
 			break;
 		case T_OpExpr:
-		{
-			OpExpr *opexpr;
+			{
+				OpExpr	   *opexpr;
 
-			opexpr = pgqs_get_canonical_opexpr((OpExpr *) expr, NULL);
+				opexpr = pgqs_get_canonical_opexpr((OpExpr *) expr, NULL);
 
-			appendStringInfo(buffer, "%d", opexpr->opno);
-			exprRepr((Expr *) opexpr->args, buffer, context, include_const);
-			break;
-		}
+				appendStringInfo(buffer, "%d", opexpr->opno);
+				exprRepr((Expr *) opexpr->args, buffer, context, include_const);
+				break;
+			}
 		case T_Var:
 			{
 				Var		   *var = (Var *) expr;
