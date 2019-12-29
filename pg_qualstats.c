@@ -30,6 +30,12 @@
 #if PG_VERSION_NUM >= 90600
 #include "access/parallel.h"
 #endif
+#if PG_VERSION_NUM >= 100000 && PG_VERSION_NUM < 110000
+#include "catalog/pg_authid.h"
+#endif
+#if PG_VERSION_NUM >= 110000
+#include "catalog/pg_authid_d.h"
+#endif
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_operator.h"
@@ -1682,9 +1688,19 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
 	HASH_SEQ_STATUS hash_seq;
+	Oid			userid = GetUserId();
+	bool		is_allowed_role = false;
 	pgqsEntry  *entry;
 	Datum	   *values;
 	bool	   *nulls;
+
+#if PG_VERSION_NUM >= 100000
+	/* Superusers or members of pg_read_all_stats members are allowed */
+	is_allowed_role = is_member_of_role(GetUserId(), DEFAULT_ROLE_READ_ALL_STATS);
+#else
+	 /* Superusers are allowed */
+	is_allowed_role = superuser();
+#endif
 
 	if (!pgqs || !pgqs_hash)
 		ereport(ERROR,
@@ -1780,12 +1796,22 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 
 		if (entry->constvalue[0] != '\0')
 		{
-
-			values[i++] = CStringGetTextDatum((char *) pg_do_encoding_conversion(
-																				 (unsigned char *) entry->constvalue,
-																				 strlen(entry->constvalue),
-																				 PG_UTF8,
-																				 GetDatabaseEncoding()));
+			if (is_allowed_role || entry->key.userid == userid)
+			{
+				values[i++] = CStringGetTextDatum((char *) pg_do_encoding_conversion(
+							(unsigned char *) entry->constvalue,
+							strlen(entry->constvalue),
+							PG_UTF8,
+							GetDatabaseEncoding()));
+			}
+			else
+			{
+				/*
+				 * Don't show constant text, but hint as to the reason for not
+				 * doing so
+				 */
+				values[i++] = CStringGetTextDatum("<insufficient privilege>");
+			}
 		}
 		else
 			nulls[i++] = true;
