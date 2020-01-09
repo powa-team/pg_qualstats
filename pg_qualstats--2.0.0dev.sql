@@ -431,10 +431,10 @@ CREATE OR REPLACE FUNCTION pg_qualstats_index_advisor (
     min_filter integer DEFAULT 1000,
     min_selectivity integer DEFAULT 30,
     forbidden_am text[] DEFAULT '{}')
-    RETURNS jsonb
+    RETURNS json
 AS $_$
 DECLARE
-    v_res jsonb;
+    v_res json;
     v_processed bigint[] = '{}';
     v_indexes text[] = '{}';
     v_unoptimised text[] = '{}';
@@ -444,7 +444,7 @@ DECLARE
 
     v_ddl text;
     v_col text;
-    v_cur jsonb;
+    v_cur json;
     v_qualnodeid bigint;
     v_quals_todo bigint[];
     v_quals_done bigint[];
@@ -589,8 +589,8 @@ BEGIN
         -- put columns from included quals, if any, first for order dependency
         IF rec.included IS NOT NULL THEN
           FOREACH v_cur IN ARRAY rec.included LOOP
-            -- Direct cast from jsonb to bigint is only possible since pg10
-            FOR v_qualnodeid IN SELECT pg_catalog.jsonb_array_elements(v_cur)::text::bigint
+            -- Direct cast from json to bigint is only possible since pg10
+            FOR v_qualnodeid IN SELECT pg_catalog.json_array_elements(v_cur)::text::bigint
             LOOP
               v_quals_todo := v_quals_todo || v_qualnodeid;
             END LOOP;
@@ -637,7 +637,7 @@ BEGIN
       END LOOP;
     END LOOP;
 
-    v_res := pg_catalog.jsonb_build_object('indexes', v_indexes,
+    v_res := pg_catalog.json_build_object('indexes', v_indexes,
         'unoptimised', v_unoptimised);
 
     RETURN v_res;

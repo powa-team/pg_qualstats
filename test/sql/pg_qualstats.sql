@@ -54,16 +54,16 @@ SELECT * FROM adv WHERE id1 = 6 and id2 = 6 AND id3 = 6 AND val = 'meh';
 SELECT * FROM adv WHERE val ILIKE 'moh';
 SELECT COUNT(*) FROM pgqs WHERE id = 1;
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'unoptimised') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'unoptimised') v
   ORDER BY v::text COLLATE "C";
 -- check quals on removed table
 DROP TABLE pgqs;
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";

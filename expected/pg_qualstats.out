@@ -204,8 +204,8 @@ SELECT COUNT(*) FROM pgqs WHERE id = 1;
 (1 row)
 
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
                                v                               
 ---------------------------------------------------------------
@@ -215,8 +215,8 @@ SELECT v
 (3 rows)
 
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'unoptimised') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'unoptimised') v
   ORDER BY v::text COLLATE "C";
         v        
 -----------------
@@ -226,8 +226,8 @@ SELECT v
 -- check quals on removed table
 DROP TABLE pgqs;
 SELECT v
-  FROM jsonb_array_elements(
-    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
                                v                               
 ---------------------------------------------------------------
