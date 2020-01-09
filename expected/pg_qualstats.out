@@ -1,4 +1,11 @@
 CREATE EXTENSION pg_qualstats;
+-- Make sure that installcheck won't find previous data
+SELECT pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
 -- Make sure sure we'll see at least one qual
 SET pg_qualstats.sample_rate = 1;
 CREATE TABLE pgqs AS SELECT id, 'a'::text val FROM generate_series(1, 100) id;
@@ -60,7 +67,7 @@ SELECT COUNT(*) FROM pg_qualstats();
 (1 row)
 
 -- const non_commutable_operator var, should be tracked, var found on RHS
-SELECT * FROM pgqs WHERE 'somevalue' ^@ val;
+SELECT * FROM pgqs WHERE 'meh' ~ val;
  id | val 
 ----+-----
 (0 rows)
@@ -105,12 +112,13 @@ SELECT * FROM pgqs WHERE 0 = id;
 ----+-----
 (0 rows)
 
-SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
- lrelid | lattnum | rrelid | rattnum 
---------+---------+--------+---------
- pgqs   |       1 |        |        
- pgqs   |       1 |        |        
-(2 rows)
+SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum, sum(occurences)
+FROM pg_qualstats()
+GROUP by 1, 2, 3, 4;
+ lrelid | lattnum | rrelid | rattnum | sum 
+--------+---------+--------+---------+-----
+ pgqs   |       1 |        |         |   2
+(1 row)
 
 SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
  count 

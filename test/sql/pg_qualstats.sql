@@ -1,5 +1,8 @@
 CREATE EXTENSION pg_qualstats;
 
+-- Make sure that installcheck won't find previous data
+SELECT pg_qualstats_reset();
+
 -- Make sure sure we'll see at least one qual
 SET pg_qualstats.sample_rate = 1;
 
@@ -18,7 +21,7 @@ SELECT COUNT(*) FROM pg_qualstats();
 SELECT * FROM (SELECT * FROM pgqs LIMIT 0) pgqs WHERE pgqs.id = 0;
 SELECT COUNT(*) FROM pg_qualstats();
 -- const non_commutable_operator var, should be tracked, var found on RHS
-SELECT * FROM pgqs WHERE 'somevalue' ^@ val;
+SELECT * FROM pgqs WHERE 'meh' ~ val;
 SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
 SELECT pg_qualstats_reset();
 -- opexpr operator var and commuted, shouldn't be tracked
@@ -28,7 +31,9 @@ SELECT COUNT(*) FROM pg_qualstats();
 -- same query with handled commuted qual, which should be found as identical
 SELECT * FROM pgqs WHERE id = 0;
 SELECT * FROM pgqs WHERE 0 = id;
-SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
+SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum, sum(occurences)
+FROM pg_qualstats()
+GROUP by 1, 2, 3, 4;
 SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
 -- (unique)qualid behavior
 SELECT pg_qualstats_reset();
