@@ -435,7 +435,7 @@ CREATE OR REPLACE FUNCTION pg_qualstats_index_advisor (
 AS $_$
 DECLARE
     v_res jsonb;
-    v_processed bigint[];
+    v_processed bigint[] = '{}';
     v_indexes text[] = '{}';
     v_unoptimised text[] = '{}';
 
