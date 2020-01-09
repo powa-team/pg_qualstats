@@ -436,8 +436,8 @@ AS $_$
 DECLARE
     v_res jsonb;
     v_processed bigint[];
-    v_indexes text[];
-    v_unoptimised text[];
+    v_indexes text[] = '{}';
+    v_unoptimised text[] = '{}';
 
     rec record;
     v_nb_processed integer = 1;
@@ -633,7 +633,7 @@ BEGIN
           pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
 
         -- and append it to the list of generated indexes
-        v_indexes := v_indexes || v_ddl;
+        v_indexes := array_append(v_indexes, v_ddl);
       END LOOP;
     END LOOP;
 
