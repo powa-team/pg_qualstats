@@ -458,7 +458,7 @@ BEGIN
     -- don't try to generate hash indexes Before pg 10, as those are only WAL
     -- logged since pg 11.
     IF pg_catalog.current_setting('server_version_num')::bigint < 100000 THEN
-        forbidden_am := forbidden_am || 'hash';
+        forbidden_am := array_append(forbidden_am, 'hash');
     END IF;
 
     -- first find out unoptimizable quals
@@ -589,7 +589,8 @@ BEGIN
         -- put columns from included quals, if any, first for order dependency
         IF rec.included IS NOT NULL THEN
           FOREACH v_cur IN ARRAY rec.included LOOP
-            FOR v_qualnodeid IN SELECT pg_catalog.jsonb_array_elements(v_cur)::bigint
+            -- Direct cast from jsonb to bigint is only possible since pg10
+            FOR v_qualnodeid IN SELECT pg_catalog.jsonb_array_elements(v_cur)::text::bigint
             LOOP
               v_quals_todo := v_quals_todo || v_qualnodeid;
             END LOOP;
