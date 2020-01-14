@@ -73,6 +73,7 @@ PG_MODULE_MAGIC;
 #define PGQS_NAME_COLUMNS 7		/* number of column added when using
 								 * pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
+#define PGQS_MAX_DEFAULT	1000	/* default pgqs_max value */
 #define PGQS_MAX_LOCAL_ENTRIES	(pgqs_max * 0.2)	/* do not track more of
 													 * 20% of possible entries
 													 * in shared mem */
@@ -82,6 +83,14 @@ PG_MODULE_MAGIC;
 
 #define PGQS_RATIO	0
 #define PGQS_NUM	1
+
+#define PGQS_LWL_ACQUIRE(lock, mode) if (!pgqs_backend) { \
+	LWLockAcquire(lock, mode); \
+	}
+
+#define PGQS_LWL_RELEASE(lock) if (!pgqs_backend) { \
+	LWLockRelease(lock); \
+	}
 
 /*---- Function declarations ----*/
 
@@ -101,6 +110,7 @@ PG_FUNCTION_INFO_V1(pg_qualstats_names);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_query);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
+static void pgqs_backend_mode_startup(void);
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgqs_ExecutorRun(QueryDesc *queryDesc,
@@ -129,8 +139,9 @@ static uint32 pgqs_hash_fn(const void *key, Size keysize);
 static uint32 pgqs_uint32_hashfn(const void *key, Size keysize);
 #endif
 
+static bool pgqs_backend = false;
 static int	pgqs_query_size;
-static int	pgqs_max;			/* max # statements to track */
+static int	pgqs_max = PGQS_MAX_DEFAULT;			/* max # statements to track */
 static bool pgqs_track_pgcatalog;	/* track queries on pg_catalog */
 static bool pgqs_resolve_oids;	/* resolve oids */
 static bool pgqs_enabled;
@@ -315,8 +326,14 @@ _PG_init(void)
 {
 	if (!process_shared_preload_libraries_in_progress)
 	{
-		elog(ERROR, "This module can only be loaded via shared_preload_libraries");
-		return;
+		elog(WARNING, "Without shared_preload_libraries, only current backend stats will be available.");
+		pgqs_backend = true;
+	}
+	else
+	{
+		pgqs_backend = false;
+		prev_shmem_startup_hook = shmem_startup_hook;
+		shmem_startup_hook = pgqs_shmem_startup;
 	}
 
 	prev_ExecutorStart = ExecutorStart_hook;
@@ -327,8 +344,6 @@ _PG_init(void)
 	ExecutorFinish_hook = pgqs_ExecutorFinish;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgqs_ExecutorEnd;
-	prev_shmem_startup_hook = shmem_startup_hook;
-	shmem_startup_hook = pgqs_shmem_startup;
 
 	DefineCustomBoolVariable("pg_qualstats.enabled",
 							 "Enable / Disable pg_qualstats",
@@ -356,25 +371,26 @@ _PG_init(void)
 							"Sets the maximum number of statements tracked by pg_qualstats.",
 							NULL,
 							&pgqs_max,
-							1000,
+							PGQS_MAX_DEFAULT,
 							100,
 							INT_MAX,
-							PGC_POSTMASTER,
+							pgqs_backend ? PGC_USERSET : PGC_POSTMASTER,
 							0,
 							NULL,
 							NULL,
 							NULL);
 
-	DefineCustomBoolVariable("pg_qualstats.resolve_oids",
-							 "Store names alongside the oid. Eats MUCH more space!",
-							 NULL,
-							 &pgqs_resolve_oids,
-							 false,
-							 PGC_POSTMASTER,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
+	if (!pgqs_backend)
+		DefineCustomBoolVariable("pg_qualstats.resolve_oids",
+								 "Store names alongside the oid. Eats MUCH more space!",
+								 NULL,
+								 &pgqs_resolve_oids,
+								 false,
+								 PGC_POSTMASTER,
+								 0,
+								 NULL,
+								 NULL,
+								 NULL);
 
 	DefineCustomBoolVariable("pg_qualstats.track_pg_catalog",
 							 "Track quals on system catalogs too.",
@@ -430,12 +446,18 @@ _PG_init(void)
 
 	parse_int(GetConfigOption("track_activity_query_size", false, false),
 			  &pgqs_query_size, 0, NULL);
-	RequestAddinShmemSpace(pgqs_memsize());
+
+	if (!pgqs_backend)
+	{
+		RequestAddinShmemSpace(pgqs_memsize());
 #if PG_VERSION_NUM >= 90600
-	RequestNamedLWLockTranche("pg_qualstats", 3);
+		RequestNamedLWLockTranche("pg_qualstats", 3);
 #else
-	RequestAddinLWLocks(2);
+		RequestAddinLWLocks(2);
 #endif
+	}
+	else
+		pgqs_backend_mode_startup();
 }
 
 void
@@ -472,6 +494,10 @@ pgqs_set_query_sampled(bool sample)
 	/* the decisions should only be made in leader */
 	Assert(!IsParallelWorker());
 
+	/* not supported in backend mode */
+	if (pgqs_backend)
+		return;
+
 	/* in worker processes we need to get the info from shared memory */
 	LWLockAcquire(pgqs->sampledlock, LW_EXCLUSIVE);
 	pgqs->sampled[MyBackendId] = sample;
@@ -489,10 +515,14 @@ pgqs_is_query_sampled(void)
 	if (!IsParallelWorker())
 		return query_is_sampled;
 
+	/* not supported in backend mode */
+	if (pgqs_backend)
+		return false;
+
 	/* in worker processes we need to get the info from shared memory */
-	LWLockAcquire(pgqs->sampledlock, LW_SHARED);
+	PGQS_LWL_ACQUIRE(pgqs->sampledlock, LW_SHARED);
 	sampled = pgqs->sampled[ParallelMasterBackendId];
-	LWLockRelease(pgqs->sampledlock);
+	PGQS_LWL_RELEASE(pgqs->sampledlock);
 
 	return sampled;
 #else
@@ -651,7 +681,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	pgqsQueryStringEntry *queryEntry;
 	bool		found;
 
-	if (pgqs_enabled && pgqs_is_query_sampled()
+	if ((pgqs || pgqs_backend) && pgqs_enabled && pgqs_is_query_sampled()
 #if PG_VERSION_NUM >= 90600
 		&& (!IsParallelWorker())
 #endif
@@ -689,7 +719,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		if (pgqs_track_constants)
 		{
 			/* Lookup the hash table entry with a shared lock. */
-			LWLockAcquire(pgqs->querylock, LW_SHARED);
+			PGQS_LWL_ACQUIRE(pgqs->querylock, LW_SHARED);
 
 			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
 																			  context->queryId,
@@ -701,8 +731,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 				bool		excl_found;
 
 				/* Need exclusive lock to add a new hashtable entry - promote */
-				LWLockRelease(pgqs->querylock);
-				LWLockAcquire(pgqs->querylock, LW_EXCLUSIVE);
+				PGQS_LWL_RELEASE(pgqs->querylock);
+				PGQS_LWL_ACQUIRE(pgqs->querylock, LW_EXCLUSIVE);
 
 				while (hash_get_num_entries(pgqs_query_examples_hash) >= pgqs_max)
 					pgqs_queryentry_dealloc();
@@ -716,7 +746,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					strncpy(queryEntry->querytext, context->querytext, pgqs_query_size);
 			}
 
-			LWLockRelease(pgqs->querylock);
+			PGQS_LWL_RELEASE(pgqs->querylock);
 		}
 
 		/* create local hash table if it hasn't been created yet */
@@ -757,7 +787,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			if (nvictims > 0)
 				pgqs_localentry_dealloc(nvictims);
 
-			LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+			PGQS_LWL_ACQUIRE(pgqs->lock, LW_EXCLUSIVE);
 
 			while (hash_get_num_entries(pgqs_hash) +
 				   hash_get_num_entries(pgqs_localhash) >= pgqs_max)
@@ -788,7 +818,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 				hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
 			}
 
-			LWLockRelease(pgqs->lock);
+			PGQS_LWL_RELEASE(pgqs->lock);
 		}
 	}
 
@@ -933,7 +963,6 @@ pgqs_queryentry_dealloc(void)
 									entry->key.queryid, HASH_REMOVE, NULL);
 		hash_seq_term(&hash_seq);
 	}
-
 }
 
 /*
@@ -1720,14 +1749,55 @@ pgqs_whereclause_tree_walker(Node *node, pgqsWalkerContext *context)
 }
 
 static void
+pgqs_backend_mode_startup(void)
+{
+	HASHCTL		info;
+	HASHCTL		queryinfo;
+
+	memset(&info, 0, sizeof(info));
+	memset(&queryinfo, 0, sizeof(queryinfo));
+	info.keysize = sizeof(pgqsHashKey);
+	info.hcxt = TopMemoryContext;
+	queryinfo.keysize = sizeof(pgqsQueryStringHashKey);
+	queryinfo.entrysize = sizeof(pgqsQueryStringEntry) + pgqs_query_size * sizeof(char);
+	queryinfo.hcxt = TopMemoryContext;
+
+	if (pgqs_resolve_oids)
+		info.entrysize = sizeof(pgqsEntryWithNames);
+	else
+		info.entrysize = sizeof(pgqsEntry);
+
+	info.hash = pgqs_hash_fn;
+
+	pgqs_hash = hash_create("pg_qualstatements_hash",
+							  pgqs_max,
+							  &info,
+							  HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+	pgqs_query_examples_hash = hash_create("pg_qualqueryexamples_hash",
+											 pgqs_max,
+											 &queryinfo,
+
+/* On PG > 9.5, use the HASH_BLOBS optimization for uint32 keys. */
+#if PG_VERSION_NUM >= 90500
+											 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+#else
+											 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+#endif
+}
+
+static void
 pgqs_shmem_startup(void)
 {
 	HASHCTL		info;
 	HASHCTL		queryinfo;
 	bool		found;
 
+	Assert(!pgqs_backend);
+
 	if (prev_shmem_startup_hook)
 		prev_shmem_startup_hook();
+
 	pgqs = NULL;
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 	pgqs = ShmemInitStruct("pg_qualstats",
@@ -1792,14 +1862,14 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS hash_seq;
 	pgqsEntry  *entry;
 
-	if (!pgqs || !pgqs_hash)
+	if ((!pgqs && !pgqs_backend) || !pgqs_hash)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
 	}
 
-	LWLockAcquire(pgqs->lock, LW_EXCLUSIVE);
+	PGQS_LWL_ACQUIRE(pgqs->lock, LW_EXCLUSIVE);
 
 	hash_seq_init(&hash_seq, pgqs_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
@@ -1807,7 +1877,7 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 		hash_search(pgqs_hash, &entry->key, HASH_REMOVE, NULL);
 	}
 
-	LWLockRelease(pgqs->lock);
+	PGQS_LWL_RELEASE(pgqs->lock);
 	PG_RETURN_VOID();
 }
 
@@ -1847,7 +1917,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	is_allowed_role = superuser();
 #endif
 
-	if (!pgqs || !pgqs_hash)
+	if ((!pgqs && !pgqs_backend) || !pgqs_hash)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
@@ -1872,7 +1942,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	rsinfo->setResult = tupstore;
 	rsinfo->setDesc = tupdesc;
 
-	LWLockAcquire(pgqs->lock, LW_SHARED);
+	PGQS_LWL_ACQUIRE(pgqs->lock, LW_SHARED);
 	hash_seq_init(&hash_seq, pgqs_hash);
 
 	if (include_names)
@@ -2010,7 +2080,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 
-	LWLockRelease(pgqs->lock);
+	PGQS_LWL_RELEASE(pgqs->lock);
 	tuplestore_donestoring(tupstore);
 	MemoryContextSwitchTo(oldcontext);
 
@@ -2029,16 +2099,21 @@ pg_qualstats_example_query(PG_FUNCTION_ARGS)
 	pgqsQueryStringHashKey queryKey;
 	bool		found;
 
+	if ((!pgqs && !pgqs_backend) || !pgqs_hash)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
+
 	/* don't search the hash table if track_constants isn't enabled */
 	if (!pgqs_track_constants)
 		PG_RETURN_NULL();
 
 	queryKey.queryid = queryid;
 
-	LWLockAcquire(pgqs->querylock, LW_SHARED);
+	PGQS_LWL_ACQUIRE(pgqs->querylock, LW_SHARED);
 	entry = hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
 										queryid, HASH_FIND, &found);
-	LWLockRelease(pgqs->querylock);
+	PGQS_LWL_RELEASE(pgqs->querylock);
 
 	if (found)
 		PG_RETURN_TEXT_P(cstring_to_text(entry->querytext));
@@ -2057,7 +2132,7 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS hash_seq;
 	pgqsQueryStringEntry *entry;
 
-	if (!pgqs || !pgqs_query_examples_hash)
+	if ((!pgqs && !pgqs_backend) || !pgqs_query_examples_hash)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pg_qualstats must be loaded via shared_preload_libraries")));
@@ -2090,7 +2165,7 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS)
 	if (!pgqs_track_constants)
 		return (Datum) 0;
 
-	LWLockAcquire(pgqs->querylock, LW_SHARED);
+	PGQS_LWL_ACQUIRE(pgqs->querylock, LW_SHARED);
 	hash_seq_init(&hash_seq, pgqs_query_examples_hash);
 
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
@@ -2109,7 +2184,7 @@ pg_qualstats_example_queries(PG_FUNCTION_ARGS)
 
 	}
 
-	LWLockRelease(pgqs->querylock);
+	PGQS_LWL_RELEASE(pgqs->querylock);
 
 	return (Datum) 0;
 }
