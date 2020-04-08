@@ -1,8 +1,10 @@
-2.0.0(WIP)
+2.0.0
   New features:
     - Handle statistics on selectivity estimation errors (Julien Rouhaud, per
       idea from Oleg Bartunov)
     - Add an index advisor feature (Julien Rouhaud)
+    - Allow pgqs to work locally without being in shared_preload_libraries
+      (Julien Rouhaud)
   Bugfix:
     - Fix handling of quals of the form Constant Operator Val where the
       operator doesn't have a commutator
