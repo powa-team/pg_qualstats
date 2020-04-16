@@ -118,7 +118,9 @@ The extension defines the following functions:
    - *queryid*: if pg_stats_statements is installed, the queryid identifying
      this query, otherwise NULL.
    - *constvalue*: a string representation of the right-hand side constant, if
-     any, truncated to 80 bytes.
+     any, truncated to 80 bytes. Require to be *superuser* or member of
+     *pg_read_all_stats* (since PostgreSQL 10), "<insufficient privilege>"
+     will be showed instead.
    - *eval_type*: evaluation type. 'f' for a predicate evaluated after a scan
      or 'i' for an index predicate.
 
