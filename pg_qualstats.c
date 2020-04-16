@@ -916,9 +916,11 @@ pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src)
 static void
 pgqs_entry_err_estim(pgqsEntry *e, double err_estim[2], int64 occurences)
 {
+	int		i;
+
 	e->occurences += occurences;
 
-	for (int i = 0; i < 2; i++)
+	for (i = 0; i < 2; i++)
 	{
 		if ((e->occurences - occurences) == 0)
 		{
@@ -1503,6 +1505,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		Oid		   *sreliddest;
 		AttrNumber *sattnumdest;
 		pgqsEntry	tempentry;
+		int			step;
 
 		pgqs_entry_init(&tempentry);
 		tempentry.opoid = expr->opno;
@@ -1516,7 +1519,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 		sreliddest = &(tempentry.lrelid);
 		sattnumdest = &(tempentry.lattnum);
 
-		for (int step = 0; step < 2; step++)
+		for (step = 0; step < 2; step++)
 		{
 			if (IsA(node, RelabelType))
 				node = (Node *) ((RelabelType *) node)->arg;
@@ -1954,7 +1957,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	nulls = palloc0(sizeof(bool) * nb_columns);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		int			i = 0;
+		int			i = 0, j;
 		double		stddev_estim[2];
 
 		memset(values, 0, sizeof(Datum) * nb_columns);
@@ -1999,7 +2002,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = Int64GetDatum(entry->count);
 		values[i++] = Int64GetDatum(entry->nbfiltered);
 
-		for (int j = 0; j < 2; j++)
+		for (j = 0; j < 2; j++)
 		{
 			if (j == PGQS_RATIO)	/* min/max ratio are double precision */
 			{
