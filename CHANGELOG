@@ -15,6 +15,7 @@
     - Compute the same identifier whether the operator was commuted or not
     - Correctly discard all quals not referencing a relation
     - Fix (unique)qualid computation to only consider AND-ed quals
+    - Don't expose recorded constants to unauthorized users
   Miscellaneous:
     - Add missing fields description (Julien Rouhaud)
 1.0.9
