@@ -1,3 +1,9 @@
+pg-qualstats (2.0.1-1) unstable; urgency=medium
+
+  * New upstream version
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Sat, 25 Apr 2020 12:49:35 +0000
+
 pg-qualstats (1.0.9-1) unstable; urgency=medium
 
   * New upstream version.
