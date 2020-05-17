@@ -69,7 +69,6 @@
 
 PG_MODULE_MAGIC;
 
-#define PGQS_COLUMNS 26			/* number of columns in pg_qualstats  SRF */
 #define PGQS_NAME_COLUMNS 7		/* number of column added when using
 								 * pg_qualstats_column SRF */
 #define PGQS_USAGE_DEALLOC_PERCENT	5	/* free this % of entries at once */
@@ -92,6 +91,15 @@ PG_MODULE_MAGIC;
 	LWLockRelease(lock); \
 	}
 
+/*
+ * Extension version number, for supporting older extension versions' objects
+ */
+typedef enum pgssVersion
+{
+	PGQS_V1_0 = 0,
+	PGQS_V2_0
+} pgqsVersion;
+
 /*---- Function declarations ----*/
 
 void		_PG_init(void);
@@ -99,14 +107,19 @@ void		_PG_fini(void);
 
 extern Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats(PG_FUNCTION_ARGS);
+extern Datum pg_qualstats_2_0(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats_names(PG_FUNCTION_ARGS);
-static Datum pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names);
+extern Datum pg_qualstats_names_2_0(PG_FUNCTION_ARGS);
+static Datum pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
+								 bool include_names);
 extern Datum pg_qualstats_example_query(PG_FUNCTION_ARGS);
 extern Datum pg_qualstats_example_queries(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
+PG_FUNCTION_INFO_V1(pg_qualstats_2_0);
 PG_FUNCTION_INFO_V1(pg_qualstats_names);
+PG_FUNCTION_INFO_V1(pg_qualstats_names_2_0);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_query);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
@@ -1884,23 +1897,52 @@ pg_qualstats_reset(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/* Number of output arguments (columns) for various API versions */
+#define PG_QUALSTATS_COLS_V1_0	18
+#define PG_QUALSTATS_COLS_V2_0	26
+#define PG_QUALSTATS_COLS		26	/* maximum of above */
+
+/*
+ * Retrieve statement statistics.
+ *
+ * The SQL API of this function has changed multiple times, and will likely
+ * do so again in future.  To support the case where a newer version of this
+ * loadable module is being used with an old SQL declaration of the function,
+ * we continue to support the older API versions.  For 2.0.X and later, the
+ * expected API version is identified by embedding it in the C name of the
+ * function.  Unfortunately we weren't bright enough to do that for older
+ * versions.
+ */
 Datum
-pg_qualstats_names(PG_FUNCTION_ARGS)
+pg_qualstats_2_0(PG_FUNCTION_ARGS)
 {
-	return pg_qualstats_common(fcinfo, true);
+	return pg_qualstats_common(fcinfo, PGQS_V2_0, false);
+}
+
+Datum
+pg_qualstats_names_2_0(PG_FUNCTION_ARGS)
+{
+	return pg_qualstats_common(fcinfo, PGQS_V2_0, true);
 }
 
 Datum
 pg_qualstats(PG_FUNCTION_ARGS)
 {
-	return pg_qualstats_common(fcinfo, false);
+	return pg_qualstats_common(fcinfo, PGQS_V1_0, false);
 }
 
 Datum
-pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
+pg_qualstats_names(PG_FUNCTION_ARGS)
+{
+	return pg_qualstats_common(fcinfo, PGQS_V1_0, true);
+}
+
+Datum
+pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
+					bool include_names)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-	int			nb_columns = PGQS_COLUMNS;
+	int			nb_columns;
 	TupleDesc	tupdesc;
 	Tuplestorestate *tupstore;
 	MemoryContext per_query_ctx;
@@ -1940,6 +1982,24 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		elog(ERROR, "return type must be a row type");
+
+	/* Check we have the expected number of output arguments. */
+	switch (tupdesc->natts)
+	{
+		case PG_QUALSTATS_COLS_V1_0:
+		case PG_QUALSTATS_COLS_V1_0 + PGQS_NAME_COLUMNS:
+			if (api_version != PGQS_V1_0)
+				elog(ERROR, "incorrect number of output arguments");
+			break;
+		case PG_QUALSTATS_COLS_V2_0:
+		case PG_QUALSTATS_COLS_V2_0 + PGQS_NAME_COLUMNS:
+			if (api_version != PGQS_V2_0)
+				elog(ERROR, "incorrect number of output arguments");
+			break;
+		default:
+			elog(ERROR, "incorrect number of output arguments");
+	}
+
 	tupstore = tuplestore_begin_heap(true, false, work_mem);
 	rsinfo->returnMode = SFRM_Materialize;
 	rsinfo->setResult = tupstore;
@@ -1947,6 +2007,11 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 
 	PGQS_LWL_ACQUIRE(pgqs->lock, LW_SHARED);
 	hash_seq_init(&hash_seq, pgqs_hash);
+
+	if (api_version == PGQS_V1_0)
+		nb_columns = PG_QUALSTATS_COLS_V1_0;
+	else
+		nb_columns = PG_QUALSTATS_COLS_V2_0;
 
 	if (include_names)
 		nb_columns += PGQS_NAME_COLUMNS;
@@ -2002,24 +2067,27 @@ pg_qualstats_common(PG_FUNCTION_ARGS, bool include_names)
 		values[i++] = Int64GetDatum(entry->count);
 		values[i++] = Int64GetDatum(entry->nbfiltered);
 
-		for (j = 0; j < 2; j++)
+		if (api_version >= PGQS_V2_0)
 		{
-			if (j == PGQS_RATIO)	/* min/max ratio are double precision */
-			{
-				values[i++] = Float8GetDatum(entry->min_err_estim[j]);
-				values[i++] = Float8GetDatum(entry->max_err_estim[j]);
-			}
-			else				/* min/max num are bigint */
-			{
-				values[i++] = Int64GetDatum(entry->min_err_estim[j]);
-				values[i++] = Int64GetDatum(entry->max_err_estim[j]);
-			}
-			values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
-			if (entry->occurences > 1)
-				stddev_estim[j] = sqrt(entry->sum_err_estim[j] / entry->occurences);
-			else
-				stddev_estim[j] = 0.0;
-			values[i++] = Float8GetDatumFast(stddev_estim[j]);
+			for (j = 0; j < 2; j++)
+				{
+					if (j == PGQS_RATIO)	/* min/max ratio are double precision */
+					{
+						values[i++] = Float8GetDatum(entry->min_err_estim[j]);
+						values[i++] = Float8GetDatum(entry->max_err_estim[j]);
+					}
+					else				/* min/max num are bigint */
+					{
+						values[i++] = Int64GetDatum(entry->min_err_estim[j]);
+						values[i++] = Int64GetDatum(entry->max_err_estim[j]);
+					}
+					values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
+					if (entry->occurences > 1)
+						stddev_estim[j] = sqrt(entry->sum_err_estim[j] / entry->occurences);
+					else
+						stddev_estim[j] = 0.0;
+					values[i++] = Float8GetDatumFast(stddev_estim[j]);
+				}
 		}
 
 		if (entry->position == -1)

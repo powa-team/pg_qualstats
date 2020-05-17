@@ -158,7 +158,7 @@ CREATE FUNCTION pg_qualstats(
   OUT eval_type  "char"
 )
 RETURNS SETOF record
-AS 'MODULE_PATHNAME'
+AS 'MODULE_PATHNAME', 'pg_qualstats_2_0'
 LANGUAGE C STRICT VOLATILE;
 
 /*"""
@@ -196,6 +196,14 @@ CREATE FUNCTION pg_qualstats_names(
   OUT occurences bigint,
   OUT execution_count bigint,
   OUT nbfiltered bigint,
+  OUT min_err_estimate_ratio double precision,
+  OUT max_err_estimate_ratio double precision,
+  OUT mean_err_estimate_ratio double precision,
+  OUT stddev_err_estimate_ratio double precision,
+  OUT min_err_estimate_num bigint,
+  OUT max_err_estimate_num bigint,
+  OUT mean_err_estimate_num double precision,
+  OUT stddev_err_estimate_num double precision,
   OUT constant_position int,
   OUT queryid    bigint,
   OUT constvalue varchar,
@@ -209,7 +217,7 @@ CREATE FUNCTION pg_qualstats_names(
   OUT rattname text
 )
 RETURNS SETOF record
-AS 'MODULE_PATHNAME'
+AS 'MODULE_PATHNAME', 'pg_qualstats_names_2_0'
 LANGUAGE C STRICT VOLATILE;
 
 
