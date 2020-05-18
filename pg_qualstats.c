@@ -94,7 +94,7 @@ PG_MODULE_MAGIC;
 /*
  * Extension version number, for supporting older extension versions' objects
  */
-typedef enum pgssVersion
+typedef enum pgqsVersion
 {
 	PGQS_V1_0 = 0,
 	PGQS_V2_0
