@@ -134,9 +134,48 @@ ro=# select * from pg_qualstats;
      10 │ 16384 │  16391 │       2 │   98 │  16385 │       2 │ <NULL> │       <NULL> │  497379130 │        497379130 │          1 │               0 │          0 │            <NULL> │  <NULL> │                │ f
 ```
 
+ - **pg_qualstats_index_advisor(min_filter, min_selectivity, forbidden_am)**:
+   Perform a global index suggestion.  By default, only predicates filtering at
+   least 1000 rows and 30% of the rows in average will be considered, but this
+   can be passed as parameter.  You can also provide an array of index access
+   method if you want to avoid some.  For instance, on PostgreSQL 9.6 and
+   prior, `hash` indexes will be ignored as those weren't crash safe yet.
 
- - **pg_qualstats_exemple_queries**: return all the stored query texts.
- - **pg_qualstats_exemple_query**: return the stored query text for the given
+   Example:
+
+```
+SELECT v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'indexes') v
+  ORDER BY v::text COLLATE "C";
+                               v
+---------------------------------------------------------------
+ "CREATE INDEX ON public.adv USING btree (id1)"
+ "CREATE INDEX ON public.adv USING btree (val, id1, id2, id3)"
+ "CREATE INDEX ON public.pgqs USING btree (id)"
+(3 rows)
+
+SELECT v
+  FROM json_array_elements(
+    pg_qualstats_index_advisor(min_filter => 50)->'unoptimised') v
+  ORDER BY v::text COLLATE "C";
+        v
+-----------------
+ "adv.val ~~* ?"
+(1 row)
+```
+
+ - **pg_qualstats_deparse_qual**: format a stored predicate in the form
+   `tablename.columname operatorname ?`.  This is mostly for the global index
+   advisor.
+ - **pg_qualstats_get_idx_col**: for the given predicate, retrieve the
+   underlying column name and all the possible operator class.  This is mostly
+   for the global index advisor.
+ - **pg_qualstats_get_qualnode_rel**: for the given predicate, return the
+   underlying table, fully qualified.  This is mostly for the global index
+   advisor
+ - **pg_qualstats_example_queries**: return all the stored query texts.
+ - **pg_qualstats_example_query**: return the stored query text for the given
    queryid if any, otherwise NULL.
  - **pg_qualstats_names**: return all the stored query texts.
  - **pg_qualstats_reset**: reset the internal counters and forget about every
@@ -174,22 +213,6 @@ ro=# select * from pg_qualstats_all;
 -------+-------+--------+---------+---------+------+--------+------------+-----------------+------------+------------
  16384 | 16385 |     10 |         | {2}     |   98 |        |          1 |          100000 |      99999 |  115075651
  16384 | 16391 |     10 |         | {2}     |   98 |        |          2 |               0 |          0 |  497379130
-```
-
-  - **pg_qualstats_indexes**: looks up those attributes for which an index
-    doesn't exist with the attribute in first position.  It's a very simple and
-    naive search, if you're interested in more advanced missing index
-    detection, look at the [powa](http://powa.readthedocs.io/) project.
-
-  Example:
-```
-ro=# select * from pg_qualstats_indexes;
-      relid       |          attnames           | possible_types | execution_count
-------------------+-----------------------------+----------------+-----------------
- pgbench_accounts | {filler}                    | {btree,hash}   |               5
- pgbench_accounts | {bid}                       | {btree,hash}   |               2
- pgbench_accounts | {bid,filler}                | {btree,hash}   |               8
-(9 rows)
 ```
 
   - **pg_qualstats_by_query**: returns only predicates of the form VAR OPERATOR
