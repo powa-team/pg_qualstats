@@ -1,3 +1,7 @@
+2.0.2
+  Bugfix:
+    - Correctly handle different versions for the SQL objects and the shared
+      library (Julien Rouhaud, per report from github users seqizz and akovac)
 2.0.1
   Bugfix:
     - Fix compilation for PG11- on some platforms (Julien Rouhaud, per report

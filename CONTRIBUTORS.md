@@ -10,4 +10,6 @@
   * Nicolas Gollet
   * Gürkan Gür
   * Devrim Gündüz
+  * github user seqizz
+  * github user akovac
   * Romain DEP
