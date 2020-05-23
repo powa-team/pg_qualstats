@@ -10,3 +10,4 @@
   * Nicolas Gollet
   * Gürkan Gür
   * Devrim Gündüz
+  * Romain DEP
