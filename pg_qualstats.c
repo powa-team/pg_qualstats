@@ -91,6 +91,10 @@ PG_MODULE_MAGIC;
 	LWLockRelease(lock); \
 	}
 
+#if PG_VERSION_NUM < 140000
+#define ParallelLeaderBackendId ParallelMasterBackendId
+#endif
+
 /*
  * Extension version number, for supporting older extension versions' objects
  */
@@ -534,7 +538,7 @@ pgqs_is_query_sampled(void)
 
 	/* in worker processes we need to get the info from shared memory */
 	PGQS_LWL_ACQUIRE(pgqs->sampledlock, LW_SHARED);
-	sampled = pgqs->sampled[ParallelMasterBackendId];
+	sampled = pgqs->sampled[ParallelLeaderBackendId];
 	PGQS_LWL_RELEASE(pgqs->sampledlock);
 
 	return sampled;
