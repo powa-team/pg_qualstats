@@ -76,6 +76,18 @@ The following GUCs can be configured, in postgresql.conf:
   will be sampled. The default (-1) means automatic, and results in a value of 1
   / max_connections, so that statiscally, concurrency issues will be rare.
 
+Updating the extension
+----------------------
+
+Note that as all extensions configured in shared_preload_libraries, most of the
+changes are only applied once PostgreSQL is restarted with the new shared
+library.  The extension object itself only provides SQL wrappers to access
+internal data structures.
+
+Also note that pg_qualstats doesn't provide extension upgrade scripts, as
+there's no data saved in any of the objects created.  Therefore, you need to
+first drop the extension then create it again to get the new version.
+
 Usage
 -----
 
