@@ -125,6 +125,19 @@ The extension defines the following functions:
    - *execution_count*: number of time this predicate has been executed, ie.
      number of rows it processed.
    - *nbfiltered*: number of tuples this predicate discarded.
+   - *min_err_estimate_ratio*: minimum selectivity estimation error ratio
+   - *max_err_estimate_ratio*: maximum selectivity estimation error ratio
+   - *mean_err_estimate_ratio*: mean selectivity estimation error ratio
+   - *stddev_err_estimate_ratio*: standard deviation for selectivity
+     estimation error ratio
+   - *min_err_estimate_num*: minimum number of line for selectivity
+     estimation error
+   - *max_err_estimate_num*: maximum number of line for selectivity
+     estimation error
+   - *mean_err_estimate_num*: mean number of line for selectivity
+     estimation error
+   - *stddev_err_estimate_num*: standard deviation for number of line for
+     selectivity estimation error
    - *constant_position*: location of the constant in the original query
      string, as reported by the parser.
    - *queryid*: if pg_stats_statements is installed, the queryid identifying
