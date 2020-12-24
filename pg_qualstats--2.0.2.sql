@@ -445,11 +445,15 @@ DECLARE
     v_res json;
     v_processed bigint[] = '{}';
     v_indexes text[] = '{}';
+    v_extstats text[] = '{}';
     v_unoptimised text[] = '{}';
 
     rec record;
     v_nb_processed integer = 1;
 
+    v_tmp text;
+    v_extname text;
+    v_relname text;
     v_ddl text;
     v_col text;
     v_cur json;
@@ -636,17 +640,34 @@ BEGIN
         -- if underlying table has been dropped, skip this (broken) index
         CONTINUE WHEN coalesce(v_ddl, '') = '';
 
+        v_tmp := v_ddl;
+
         -- generate the full CREATE INDEX ddl
-        v_ddl = pg_catalog.format('CREATE INDEX ON %s USING %I (%s)',
-          pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
+        v_ddl := pg_catalog.format('CREATE INDEX ON %s USING %I (%s)',
+          pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_tmp);
 
         -- and append it to the list of generated indexes
         v_indexes := array_append(v_indexes, v_ddl);
+
+        -- if there are two columns or more in v_tmp
+        IF position(',' in v_tmp) > 0 THEN
+          -- generate the full CREATE STATISTICS ddl
+          v_extname := regexp_replace(v_tmp, ', ', '_', 'g');
+          v_relname := regexp_replace(pg_qualstats_get_qualnode_rel(v_qualnodeid), '^.*\.', '');
+          v_extname := v_relname || '_' || v_extname || '_' || 'ext';
+
+          v_ddl := pg_catalog.format('CREATE STATISTICS %s ON %s FROM %s',
+            v_extname, v_tmp, pg_qualstats_get_qualnode_rel(v_qualnodeid));
+
+          -- and append it to the list of generated extended stats
+          v_extstats := array_append(v_extstats, v_ddl);
+        END IF;
+
       END LOOP;
     END LOOP;
 
     v_res := pg_catalog.json_build_object('indexes', v_indexes,
-        'unoptimised', v_unoptimised);
+        'unoptimised', v_unoptimised, 'extstats', v_extstats);
 
     RETURN v_res;
 END;
