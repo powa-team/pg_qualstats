@@ -1165,11 +1165,13 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	/* special child plans */
 	switch (nodeTag(plan))
 	{
+#if PG_VERSION_NUM < 140000
 		case T_ModifyTable:
 			pgqs_collectMemberNodeStats(((ModifyTableState *) planstate)->mt_nplans,
 										((ModifyTableState *) planstate)->mt_plans,
 										ancestors, context);
 			break;
+#endif
 		case T_Append:
 			pgqs_collectMemberNodeStats(((AppendState *) planstate)->as_nplans,
 										((AppendState *) planstate)->appendplans,
@@ -1958,7 +1960,10 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 	Datum	   *values;
 	bool	   *nulls;
 
-#if PG_VERSION_NUM >= 100000
+#if PG_VERSION_NUM >= 140000
+	/* Superusers or members of pg_read_all_stats members are allowed */
+	is_allowed_role = is_member_of_role(GetUserId(), ROLE_PG_READ_ALL_STATS);
+#elif PG_VERSION_NUM >= 100000
 	/* Superusers or members of pg_read_all_stats members are allowed */
 	is_allowed_role = is_member_of_role(GetUserId(), DEFAULT_ROLE_READ_ALL_STATS);
 #else
@@ -2293,8 +2298,10 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
 		context->outer_planstate = ((AppendState *) planstate)->appendplans[0];
 	else if (IsA(planstate, MergeAppendState))
 		context->outer_planstate = ((MergeAppendState *) planstate)->mergeplans[0];
+#if PG_VERSION_NUM < 140000
 	else if (IsA(planstate, ModifyTableState))
 		context->outer_planstate = ((ModifyTableState *) planstate)->mt_plans[0];
+#endif
 	else
 		context->outer_planstate = outerPlanState(planstate);
 
