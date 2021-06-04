@@ -1,3 +1,9 @@
+pg-qualstats (2.0.3-1) unstable; urgency=medium
+
+  * Team upload for PostgreSQL 14.
+
+ -- root <root@9b26d6d62525>  Fri, 04 Jun 2021 21:02:58 +0800
+
 pg-qualstats (2.0.2-2) unstable; urgency=medium
 
   * Team upload for PostgreSQL 13.

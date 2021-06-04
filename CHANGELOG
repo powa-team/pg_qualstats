@@ -1,3 +1,9 @@
+2.0.3
+  Miscellaneous:
+    - Add support for PostgreSQL 14 (Julien Rouhaud, per report from Michael
+      Paquier)
+    - Add extension update documentation (Julien Rouhaud)
+    - Debian packaging improvements (Christoph Berg)
 2.0.2
   Bugfix:
     - Correctly handle different versions for the SQL objects and the shared
