@@ -931,7 +931,7 @@ pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src)
  * Also maintain min and max values.
  */
 static void
-pgqs_entry_err_estim(pgqsEntry *e, double err_estim[2], int64 occurences)
+pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurences)
 {
 	int		i;
 
