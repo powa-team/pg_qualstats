@@ -54,7 +54,7 @@
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
-#include "postmaster/autovacuum.h"
+#include "postmaster/postmaster.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #if PG_VERSION_NUM >= 100000
@@ -2422,6 +2422,18 @@ pgqs_memsize(void)
 static Size
 pgqs_sampled_array_size(void)
 {
+	const char *guc_string;
+	int32 autovac_max_workers;
+
+	/*
+	 * autovacuum_max_workers isn't declared as PGDLLEXPORT, so retrieve it
+	 * using GetConfigOption to allow compilation on Windows.
+	 */
+	guc_string = GetConfigOption("autovacuum_max_workers",
+											 false, true);
+
+	autovac_max_workers = pg_atoi(guc_string, 4, 0);
+	Assert(autovac_max_workers >= 1 && autovac_max_workers <= MAX_BACKENDS);
 	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
@@ -2429,7 +2441,7 @@ pgqs_sampled_array_size(void)
 	 * plus autovacuum launcher and workers, plus bg workers and an extra one
 	 * since BackendId numerotation starts at 1.
 	 */
-	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
+	return (sizeof(bool) * (MaxConnections + autovac_max_workers + 1
 							+ max_worker_processes + 1));
 }
 #endif
