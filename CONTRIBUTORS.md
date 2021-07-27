@@ -13,3 +13,4 @@
   * github user seqizz
   * github user akovac
   * Romain DEP
+  * github user suprimex

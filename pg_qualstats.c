@@ -106,18 +106,18 @@ typedef enum pgqsVersion
 
 /*---- Function declarations ----*/
 
-void		_PG_init(void);
-void		_PG_fini(void);
+extern PGDLLEXPORT void		_PG_init(void);
+extern PGDLLEXPORT void		_PG_fini(void);
 
-extern Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
-extern Datum pg_qualstats(PG_FUNCTION_ARGS);
-extern Datum pg_qualstats_2_0(PG_FUNCTION_ARGS);
-extern Datum pg_qualstats_names(PG_FUNCTION_ARGS);
-extern Datum pg_qualstats_names_2_0(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_reset(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_2_0(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_names(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_names_2_0(PG_FUNCTION_ARGS);
 static Datum pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 								 bool include_names);
-extern Datum pg_qualstats_example_query(PG_FUNCTION_ARGS);
-extern Datum pg_qualstats_example_queries(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_example_query(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum pg_qualstats_example_queries(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_qualstats_reset);
 PG_FUNCTION_INFO_V1(pg_qualstats);
