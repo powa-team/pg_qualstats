@@ -2,16 +2,18 @@ Source: pg-qualstats
 Section: database
 Priority: optional
 Maintainer: Julien Rouhaud <rjuju123@gmail.com>
-Standards-Version: 4.5.0
+Uploaders:
+ Christoph Berg <myon@debian.org>,
+Standards-Version: 4.6.0
 Rules-Requires-Root: no
 Build-Depends: debhelper-compat (= 13), postgresql-all (>= 217~)
 Homepage: https://powa.readthedocs.io/
 Vcs-Browser: https://github.com/powa-team/pg_qualstats
 Vcs-Git: https://github.com/powa-team/pg_qualstats.git
 
-Package: postgresql-13-pg-qualstats
+Package: postgresql-14-pg-qualstats
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-13
+Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-14
 Description: PostgreSQL extension to gather statistics about predicates.
  This extensions tracks WHERE clauses predicates and JOIN predicates.
  Statistics will report whether the predicate was evaluated as an index scan or
