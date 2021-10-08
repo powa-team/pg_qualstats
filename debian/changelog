@@ -1,8 +1,10 @@
 pg-qualstats (2.0.3-1) unstable; urgency=medium
 
-  * Team upload for PostgreSQL 14.
+  * New upstream version with support for PostgreSQL 14.
+  * Fix github watch file.
+  * Add myself to Uploaders.
 
- -- root <root@9b26d6d62525>  Fri, 04 Jun 2021 21:02:58 +0800
+ -- Christoph Berg <myon@debian.org>  Fri, 08 Oct 2021 10:03:34 +0200
 
 pg-qualstats (2.0.2-2) unstable; urgency=medium
 
