@@ -62,7 +62,7 @@ The following GUCs can be configured, in postgresql.conf:
   this GUC will considerably reduce the number of entries necessary to keep
   track of predicates.
 - *pg_qualstats.max*: the maximum number of predicated and query text tracked
-  (defaults to 1000)
+  (defaults to 100)
 - *pg_qualstats.resolve_oids* (boolean, default false): whether or not
   pg_qualstats should resolve oids at query time, or juste store the oids.
   Enabling this parameter makes the data analysis much more easy, since a
