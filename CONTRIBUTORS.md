@@ -14,3 +14,4 @@
   * github user akovac
   * Romain DEP
   * github user suprimex
+  * github user RekGRpth

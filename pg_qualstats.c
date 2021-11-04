@@ -1359,7 +1359,8 @@ pgqs_process_booltest(BooleanTest *expr, pgqsWalkerContext *context)
 																	   GetDatabaseEncoding(),
 																	   PG_UTF8);
 
-			strncpy(entry->constvalue, utf8const, strlen(utf8const));
+			Assert(strlen(utf8const) < PGQS_CONSTANT_SIZE);
+			strcpy(entry->constvalue, utf8const);
 		}
 		else
 			memset(entry->constvalue, 0, sizeof(char) * PGQS_CONSTANT_SIZE);
