@@ -695,7 +695,6 @@ static void
 pgqs_ExecutorEnd(QueryDesc *queryDesc)
 {
 	pgqsQueryStringHashKey queryKey;
-	pgqsQueryStringEntry *queryEntry;
 	bool		found;
 
 	if ((pgqs || pgqs_backend) && pgqs_enabled && pgqs_is_query_sampled()
@@ -717,7 +716,6 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 	{
 		HASHCTL		info;
 		pgqsEntry  *localentry;
-		pgqsEntry  *newEntry;
 		HASH_SEQ_STATUS local_hash_seq;
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
@@ -738,13 +736,14 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			/* Lookup the hash table entry with a shared lock. */
 			PGQS_LWL_ACQUIRE(pgqs->querylock, LW_SHARED);
 
-			queryEntry = (pgqsQueryStringEntry *) hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
-																			  context->queryId,
-																			  HASH_FIND, &found);
+			hash_search_with_hash_value(pgqs_query_examples_hash, &queryKey,
+										context->queryId,
+										HASH_FIND, &found);
 
 			/* Create the new entry if not present */
 			if (!found)
 			{
+				pgqsQueryStringEntry *queryEntry;
 				bool		excl_found;
 
 				/* Need exclusive lock to add a new hashtable entry - promote */
@@ -813,7 +812,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 			hash_seq_init(&local_hash_seq, pgqs_localhash);
 			while ((localentry = hash_seq_search(&local_hash_seq)) != NULL)
 			{
-				newEntry = (pgqsEntry *) hash_search(pgqs_hash, &localentry->key,
+				pgqsEntry *newEntry = (pgqsEntry *) hash_search(pgqs_hash,
+													 &localentry->key,
 													 HASH_ENTER, &found);
 
 				if (!found)
@@ -2032,8 +2032,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 	nulls = palloc0(sizeof(bool) * nb_columns);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		int			i = 0, j;
-		double		stddev_estim[2];
+		int			i = 0;
 
 		memset(values, 0, sizeof(Datum) * nb_columns);
 		memset(nulls, 0, sizeof(bool) * nb_columns);
@@ -2079,25 +2078,31 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 
 		if (api_version >= PGQS_V2_0)
 		{
+			int		j;
+
 			for (j = 0; j < 2; j++)
+			{
+				double	stddev_estim;
+
+				if (j == PGQS_RATIO)	/* min/max ratio are double precision */
 				{
-					if (j == PGQS_RATIO)	/* min/max ratio are double precision */
-					{
-						values[i++] = Float8GetDatum(entry->min_err_estim[j]);
-						values[i++] = Float8GetDatum(entry->max_err_estim[j]);
-					}
-					else				/* min/max num are bigint */
-					{
-						values[i++] = Int64GetDatum(entry->min_err_estim[j]);
-						values[i++] = Int64GetDatum(entry->max_err_estim[j]);
-					}
-					values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
-					if (entry->occurences > 1)
-						stddev_estim[j] = sqrt(entry->sum_err_estim[j] / entry->occurences);
-					else
-						stddev_estim[j] = 0.0;
-					values[i++] = Float8GetDatumFast(stddev_estim[j]);
+					values[i++] = Float8GetDatum(entry->min_err_estim[j]);
+					values[i++] = Float8GetDatum(entry->max_err_estim[j]);
 				}
+				else				/* min/max num are bigint */
+				{
+					values[i++] = Int64GetDatum(entry->min_err_estim[j]);
+					values[i++] = Int64GetDatum(entry->max_err_estim[j]);
+				}
+				values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
+
+				if (entry->occurences > 1)
+					stddev_estim = sqrt(entry->sum_err_estim[j] / entry->occurences);
+				else
+					stddev_estim = 0.0;
+
+				values[i++] = Float8GetDatumFast(stddev_estim);
+			}
 		}
 
 		if (entry->position == -1)
