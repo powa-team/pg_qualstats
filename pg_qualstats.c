@@ -2301,12 +2301,22 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
 	context->inner_planstate = NULL;
 	context->planstate = planstate;
 	if (IsA(planstate, AppendState))
-		context->outer_planstate = ((AppendState *) planstate)->appendplans[0];
+	{
+		AppendState * appendstate = (AppendState *) planstate;
+		if (appendstate->as_nplans > 0)
+			context->outer_planstate = appendstate->appendplans[0];
+	}
 	else if (IsA(planstate, MergeAppendState))
-		context->outer_planstate = ((MergeAppendState *) planstate)->mergeplans[0];
+	{
+		MergeAppendState * mergeappendstate = (MergeAppendState *) planstate;
+		if (mergeappendstate->ms_nplans > 0)
+			context->outer_planstate = mergeappendstate->mergeplans[0];
+	}
 #if PG_VERSION_NUM < 140000
 	else if (IsA(planstate, ModifyTableState))
+	{
 		context->outer_planstate = ((ModifyTableState *) planstate)->mt_plans[0];
+	}
 #endif
 	else
 		context->outer_planstate = outerPlanState(planstate);
