@@ -42,6 +42,9 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
+#if PG_VERSION_NUM >= 150000
+#include "common/pg_prng.h"
+#endif
 #include "fmgr.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -606,8 +609,13 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 #endif
 			)
 		{
+#if PG_VERSION_NUM >= 150000
+			query_is_sampled = (pg_prng_double(&pg_global_prng_state) <
+									pgqs_sample_rate);
+#else
 			query_is_sampled = (random() <= (MAX_RANDOM_VALUE *
 											 pgqs_sample_rate));
+#endif
 #if PG_VERSION_NUM >= 90600
 			pgqs_set_query_sampled(query_is_sampled);
 #endif
