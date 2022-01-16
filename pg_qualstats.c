@@ -20,7 +20,7 @@
  * The implementation is heavily inspired by pg_stat_statements
  *
  * Copyright (c) 2014,2017 Ronan Dunklau
- * Copyright (c) 2018-2021, The Powa-Team
+ * Copyright (c) 2018-2022, The Powa-Team
  *-------------------------------------------------------------------------
  */
 #include <limits.h>
