@@ -81,12 +81,13 @@ Updating the extension
 
 Note that as all extensions configured in shared_preload_libraries, most of the
 changes are only applied once PostgreSQL is restarted with the new shared
-library.  The extension object itself only provides SQL wrappers to access
-internal data structures.
+library version.  The extension objects themselves only provides SQL wrappers
+to access internal data structures.
 
-Also note that pg_qualstats doesn't provide extension upgrade scripts, as
-there's no data saved in any of the objects created.  Therefore, you need to
-first drop the extension then create it again to get the new version.
+Since version 2.0.4, an upgrade script is provided, allowing to upgade from the
+previous version only.  If you want to upgrade the extension across multiple
+versions, or from a version older than 2.0.3, you will need top drop and
+recreate the extension to get the latest version.
 
 Usage
 -----
