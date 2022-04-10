@@ -57,7 +57,13 @@
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
 #include "parser/parsetree.h"
+#if PG_VERSION_NUM >= 150000
+#include "postmaster/autovacuum.h"
+#endif
 #include "postmaster/postmaster.h"
+#if PG_VERSION_NUM >= 150000
+#include "replication/walsender.h"
+#endif
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #if PG_VERSION_NUM >= 100000
@@ -2448,12 +2454,13 @@ pgqs_sampled_array_size(void)
 {
 	int32 _autovac_max_workers;
 	int32 _max_wal_senders;
+#if PG_VERSION_NUM < 150000
 	const char *guc_string;
 
 	/*
 	 * autovacuum_max_workers and max_wal_senders aren't declared as
-	 * PGDLLIMPORT, so retrieve them using GetConfigOption to allow compilation
-	 * on Windows.
+	 * PGDLLIMPORT in pg15- versions, so retrieve them using GetConfigOption to
+	 * allow compilation on Windows.
 	 */
 	guc_string = GetConfigOption("autovacuum_max_workers",
 											 false, true);
@@ -2466,7 +2473,10 @@ pgqs_sampled_array_size(void)
 
 	_max_wal_senders = pg_atoi(guc_string, 4, 0);
 	Assert(_max_wal_senders >= 0 && _max_wal_senders <= MAX_BACKENDS);
-
+#else
+	_autovac_max_workers = autovacuum_max_workers;
+	_max_wal_senders = max_wal_senders;
+#endif
 	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
