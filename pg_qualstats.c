@@ -136,6 +136,9 @@ PG_FUNCTION_INFO_V1(pg_qualstats_example_query);
 PG_FUNCTION_INFO_V1(pg_qualstats_example_queries);
 
 static void pgqs_backend_mode_startup(void);
+#if PG_VERSION_NUM >= 150000
+static void pgqs_shmem_request(void);
+#endif
 static void pgqs_shmem_startup(void);
 static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgqs_ExecutorRun(QueryDesc *queryDesc,
@@ -156,6 +159,9 @@ static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
+#if PG_VERSION_NUM >= 150000
+static shmem_request_hook_type prev_shmem_request_hook = NULL;
+#endif
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 static uint32 pgqs_hash_fn(const void *key, Size keysize);
@@ -357,6 +363,10 @@ _PG_init(void)
 	else
 	{
 		pgqs_backend = false;
+#if PG_VERSION_NUM >= 150000
+		prev_shmem_request_hook = shmem_request_hook;
+		shmem_request_hook = pgqs_shmem_request;
+#endif
 		prev_shmem_startup_hook = shmem_startup_hook;
 		shmem_startup_hook = pgqs_shmem_startup;
 	}
@@ -474,12 +484,14 @@ _PG_init(void)
 
 	if (!pgqs_backend)
 	{
+#if PG_VERSION_NUM < 150000
 		RequestAddinShmemSpace(pgqs_memsize());
 #if PG_VERSION_NUM >= 90600
 		RequestNamedLWLockTranche("pg_qualstats", 3);
 #else
 		RequestAddinLWLocks(2);
-#endif
+#endif		/* pg9.6+ */
+#endif		/* pg15- */
 	}
 	else
 		pgqs_backend_mode_startup();
@@ -1811,6 +1823,20 @@ pgqs_backend_mode_startup(void)
 #endif
 }
 
+#if PG_VERSION_NUM >= 150000
+static void
+pgqs_shmem_request(void)
+{
+	if (prev_shmem_request_hook)
+		prev_shmem_request_hook();
+
+	Assert(!pgqs_backend);
+
+	RequestAddinShmemSpace(pgqs_memsize());
+	RequestNamedLWLockTranche("pg_qualstats", 3);
+}
+#endif
+
 static void
 pgqs_shmem_startup(void)
 {
@@ -2440,9 +2466,14 @@ pgqs_memsize(void)
 static Size
 pgqs_sampled_array_size(void)
 {
+	int _maxbackends;
+
+#if PG_VERSION_NUM >= 150000
+	Assert(MaxBackends > 0);
+	_maxbackends = MaxBackends;
+#else
 	int32 _autovac_max_workers;
 	int32 _max_wal_senders;
-#if PG_VERSION_NUM < 150000
 	const char *guc_string;
 
 	/*
@@ -2461,18 +2492,14 @@ pgqs_sampled_array_size(void)
 
 	_max_wal_senders = pg_atoi(guc_string, 4, 0);
 	Assert(_max_wal_senders >= 0 && _max_wal_senders <= MAX_BACKENDS);
-#else
-	_autovac_max_workers = autovacuum_max_workers;
-	_max_wal_senders = max_wal_senders;
-#endif
+
 	/*
 	 * Parallel workers need to be sampled if their original query is also
 	 * sampled.  We store in shared mem the sample state for each query,
 	 * identified by their BackendId.  If need room for all possible backends,
-	 * plus autovacuum launcher and workers, plus bg workers and an extra one
-	 * since BackendId numerotation starts at 1.
+	 * plus autovacuum launcher and workers, plus bg workers.
 	 */
-	return (sizeof(bool) * (MaxConnections + _autovac_max_workers + 1
+	_maxbackends = MaxConnections + _autovac_max_workers + 1
 							+ max_worker_processes
 #if PG_VERSION_NUM >= 120000
 							/*
@@ -2480,8 +2507,12 @@ pgqs_sampled_array_size(void)
 							 * of max_connections anymore
 							 */
 							+ _max_wal_senders
-#endif
-							+ 1));
+#endif		/* pg12+ */
+							+ 1;
+#endif		/* pg15- */
+
+	/* We need an extra value since BackendId numerotationn starts at 1. */
+	return (sizeof(bool) * (_maxbackends + 1));
 }
 #endif
 
