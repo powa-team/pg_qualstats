@@ -1,3 +1,9 @@
+pg-qualstats (2.0.4-1) unstable; urgency=medium
+
+  * New upstream version with support for PostgreSQL 15.
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Mon, 16 May 2022 14:44:30 +0800
+
 pg-qualstats (2.0.3-1) unstable; urgency=medium
 
   * New upstream version with support for PostgreSQL 14.

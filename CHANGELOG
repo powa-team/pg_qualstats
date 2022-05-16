@@ -1,3 +1,16 @@
+2.0.4
+  Bugfix:
+    - Fix memory allocation for PostgreSQL 12 and above (Julien Rouhaud)
+    - Fix bug when append plans are empty (Ronan Dunklau)
+  Miscellaneous:
+    - Fix a faulty strncpy() call (Julien Rouhaud, per report from github user
+      RekGRpth)
+    - Fix some cppcheck warnings (Julien Rouhaud, per report from github user
+      RekGRpth)
+    - Add compatibility with PostgreSQL 15 (Julien Rouhaud)
+    - Improve extension ugprade documentation (Julien Rouhaud)
+    - Make sure the code can be compiled and used on Windows (Julien Rouhaud,
+      per report from github user suprimex)
 2.0.3
   Miscellaneous:
     - Add support for PostgreSQL 14 (Julien Rouhaud, per report from Michael
