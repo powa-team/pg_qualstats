@@ -265,7 +265,7 @@ typedef struct pgqsEntry
 	double		mean_err_estim[2];	/* mean estimation error ratio and num */
 	double		sum_err_estim[2];	/* sum of variances in estimation error
 									 * ratio and num */
-	int64		occurences;		/* # of qual execution, 1 per query */
+	int64		occurrences;		/* # of qual execution, 1 per query */
 } pgqsEntry;
 
 typedef struct pgqsEntryWithNames
@@ -331,7 +331,7 @@ static Expr *pgqs_resolve_var(Var *var, pgqsWalkerContext *context);
 static void pgqs_entry_dealloc(void);
 static inline void pgqs_entry_init(pgqsEntry *entry);
 static inline void pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src);
-static void pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurences);
+static void pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurrences);
 static void pgqs_queryentry_dealloc(void);
 static void pgqs_localentry_dealloc(int nvictims);
 static void pgqs_fillnames(pgqsEntryWithNames *entry);
@@ -843,7 +843,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 					newEntry->usage += localentry->usage;
 					/* compute estimation error min, max, mean and variance */
 					pgqs_entry_err_estim(newEntry, localentry->mean_err_estim,
-										 localentry->occurences);
+										 localentry->occurrences);
 				}
 				/* cleanup local hash */
 				hash_search(pgqs_localhash, &localentry->key, HASH_REMOVE, NULL);
@@ -945,15 +945,15 @@ pgqs_entry_copy_raw(pgqsEntry *dest, pgqsEntry *src)
  * Also maintain min and max values.
  */
 static void
-pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurences)
+pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurrences)
 {
 	int		i;
 
-	e->occurences += occurences;
+	e->occurrences += occurrences;
 
 	for (i = 0; i < 2; i++)
 	{
-		if ((e->occurences - occurences) == 0)
+		if ((e->occurrences - occurrences) == 0)
 		{
 			e->min_err_estim[i] = err_estim[i];
 			e->max_err_estim[i] = err_estim[i];
@@ -964,7 +964,7 @@ pgqs_entry_err_estim(pgqsEntry *e, double *err_estim, int64 occurences)
 			double		old_err = e->mean_err_estim[i];
 
 			e->mean_err_estim[i] +=
-				(err_estim[i] - old_err) / e->occurences;
+				(err_estim[i] - old_err) / e->occurrences;
 			e->sum_err_estim[i] +=
 				(err_estim[i] - old_err) * (err_estim[i] - e->mean_err_estim[i]);
 		}
@@ -2100,7 +2100,7 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 
 		values[i++] = Int64GetDatum(entry->qualnodeid);
 		values[i++] = Int64GetDatum(entry->key.uniquequalnodeid);
-		values[i++] = Int64GetDatum(entry->occurences);
+		values[i++] = Int64GetDatum(entry->occurrences);
 		values[i++] = Int64GetDatum(entry->count);
 		values[i++] = Int64GetDatum(entry->nbfiltered);
 
@@ -2124,8 +2124,8 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 				}
 				values[i++] = Float8GetDatum(entry->mean_err_estim[j]);
 
-				if (entry->occurences > 1)
-					stddev_estim = sqrt(entry->sum_err_estim[j] / entry->occurences);
+				if (entry->occurrences > 1)
+					stddev_estim = sqrt(entry->sum_err_estim[j] / entry->occurrences);
 				else
 					stddev_estim = 0.0;
 
