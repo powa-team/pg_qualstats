@@ -894,11 +894,11 @@ pgqs_entry_dealloc(void)
 	 * Sort entries by usage and deallocate PGQS_USAGE_DEALLOC_PERCENT of
 	 * them. While we're scanning the table, apply the decay factor to the
 	 * usage values.
+	 * pgqs_resolve_oids is irrelevant here as the array stores pointers
+	 * instead of entries. The struct member used for the sort are part of
+	 * pgqsEntry.
 	 */
-	if (pgqs_resolve_oids)
-		base_size = sizeof(pgqsEntryWithNames *);
-	else
-		base_size = sizeof(pgqsEntry *);
+	base_size = sizeof(pgqsEntry *);
 
 	entries = palloc(hash_get_num_entries(pgqs_hash) * base_size);
 
@@ -1510,14 +1510,14 @@ pgqs_get_canonical_opexpr(OpExpr *expr, bool *commuted)
 	/* If the 2nd argument is a Var, commute the OpExpr if possible */
 	if (IsA(lsecond(expr->args), Var) && OidIsValid(get_commutator(expr->opno)))
 	{
-		OpExpr	   *new = copyObject(expr);
+		OpExpr	   *newexpr = copyObject(expr);
 
-		CommuteOpExpr(new);
+		CommuteOpExpr(newexpr);
 
 		if (commuted)
 			*commuted = true;
 
-		return new;
+		return newexpr;
 	}
 
 	return expr;
@@ -1594,7 +1594,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 				if (var == NULL)
 				{
 					bool		commuted;
-					OpExpr	   *new = pgqs_get_canonical_opexpr(expr, &commuted);
+					OpExpr	   *newexpr = pgqs_get_canonical_opexpr(expr, &commuted);
 
 					/*
 					 * If the OpExpr was commuted we have to use the 1st
@@ -1606,7 +1606,7 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 						Assert(sreliddest == &(tempentry.lrelid));
 						Assert(sattnumdest == &(tempentry.lattnum));
 
-						node = linitial(new->args);
+						node = linitial(newexpr->args);
 					}
 				}
 
