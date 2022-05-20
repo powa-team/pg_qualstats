@@ -457,6 +457,7 @@ DECLARE
     v_quals_todo bigint[];
     v_quals_done bigint[];
     v_quals_col_done text[];
+    v_queryid bigint[];
 BEGIN
     -- sanity checks and default values
     SELECT coalesce(min_filter, 1000), coalesce(min_selectivity, 30),
@@ -509,7 +510,7 @@ BEGIN
             CASE WHEN sum(execution_count) = 0
               THEN 0
               ELSE round(sum(nbfiltered::numeric) / sum(execution_count) * 100)
-            END AS avg_selectivity
+            END AS avg_selectivity, queryid
           FROM pg_qualstats() q
           JOIN pg_catalog.pg_database d ON q.dbid = d.oid
           JOIN pg_catalog.pg_operator op ON op.oid = q.opno
@@ -521,21 +522,21 @@ BEGIN
           AND coalesce(lrelid, rrelid) != 0
           AND qualnodeid != ALL(v_processed)
           GROUP BY dbid, amname, qualid, qualnodeid, lrelid, rrelid,
-            lattnum, rattnum, opno, eval_type
+            lattnum, rattnum, opno, eval_type, queryid
         ),
         -- apply cardinality and selectivity restrictions
         filtered AS (
           SELECT (qual).relid, amname, coalesce(qualid, qualnodeid) AS parent,
-            count(*) AS weight, array_agg(qualnodeid) AS quals
+            count(*) AS weight, array_agg(qualnodeid) AS quals, queryid
           FROM pgqs
           WHERE avg_filter >= min_filter
           AND avg_selectivity >= min_selectivity
-          GROUP BY (qual).relid, amname, parent
+          GROUP BY (qual).relid, amname, parent, queryid
         ),
         -- for each possibly AND-ed qual, build the list of included qualnodeid
         nodes AS (
           SELECT p.relid, p.amname, p.parent, p.quals,
-            c.quals AS children
+            c.quals AS children, p.queryid
           FROM filtered p
           LEFT JOIN filtered c ON p.quals @> c.quals
             AND p.amname = c.amname
@@ -550,7 +551,7 @@ BEGIN
           SELECT DISTINCT *, coalesce(pg_catalog.array_length(children, 1), 0) AS weight
           FROM nodes
           UNION
-          SELECT DISTINCT p.relid, p.amname, p.parent, p.quals, c.children,
+          SELECT DISTINCT p.relid, p.amname, p.parent, p.quals, c.children, p.queryid,
             coalesce(pg_catalog.array_length(c.children, 1), 0) AS weight
           FROM nodes p
           JOIN nodes c ON p.children @> c.quals AND c.quals IS NOT NULL
@@ -570,20 +571,20 @@ BEGIN
             array_agg(to_json(children) ORDER BY weight)
               FILTER (WHERE children IS NOT NULL) AS included,
             pg_catalog.array_length(quals, 1) + sum(weight) AS path_weight,
-          CASE amname WHEN 'btree' THEN 1 ELSE 2 END AS amweight
+          CASE amname WHEN 'btree' THEN 1 ELSE 2 END AS amweight, queryid
           FROM paths
-          GROUP BY relid, amname, parent, quals
+          GROUP BY relid, amname, parent, quals, queryid
         ),
         -- compute a rank for each final paths, per relation.
         final AS (
           SELECT relid, amname, parent, quals, included, path_weight, amweight,
           row_number() OVER (
             PARTITION BY relid
-            ORDER BY path_weight DESC, amweight) AS rownum
+            ORDER BY path_weight DESC, amweight) AS rownum, queryid
           FROM computed
         )
         -- and finally choose the higher rank final path for each relation.
-        SELECT relid, amname, parent, quals, included, path_weight
+        SELECT relid, amname, parent, quals, included, path_weight, queryid
         FROM final
         WHERE rownum = 1
       LOOP
@@ -642,11 +643,13 @@ BEGIN
 
         -- and append it to the list of generated indexes
         v_indexes := array_append(v_indexes, v_ddl);
+
+        v_queryid := v_queryid || rec.queryid;
       END LOOP;
     END LOOP;
 
     v_res := pg_catalog.json_build_object('indexes', v_indexes,
-        'unoptimised', v_unoptimised);
+        'unoptimised', v_unoptimised, 'queryid', v_queryid);
 
     RETURN v_res;
 END;
