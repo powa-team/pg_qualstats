@@ -3,7 +3,7 @@
 
   Resets statistics gathered by pg_qualstats.
 */
-CREATE FUNCTION pg_qualstats_reset()
+CREATE FUNCTION @extschema@.pg_qualstats_reset()
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
@@ -13,7 +13,7 @@ LANGUAGE C;
 
   Returns an example for a normalized query, given its queryid
 */
-CREATE FUNCTION pg_qualstats_example_query(bigint)
+CREATE FUNCTION @extschema@.pg_qualstats_example_query(bigint)
 RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
@@ -24,7 +24,7 @@ LANGUAGE C;
 
   Returns all the example queries with their associated queryid
 */
-CREATE FUNCTION pg_qualstats_example_queries(OUT queryid bigint, OUT query text)
+CREATE FUNCTION @extschema@.pg_qualstats_example_queries(OUT queryid bigint, OUT query text)
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
@@ -129,7 +129,7 @@ LANGUAGE C;
       constvalue                | 2::integer
       eval_type                 | f
 */
-CREATE FUNCTION pg_qualstats(
+CREATE FUNCTION @extschema@.pg_qualstats(
   OUT userid oid,
   OUT dbid oid,
   OUT lrelid oid,
@@ -181,7 +181,7 @@ LANGUAGE C STRICT VOLATILE;
     opname (text):
       the name of the operator. Corresponds to opno.
 */
-CREATE FUNCTION pg_qualstats_names(
+CREATE FUNCTION @extschema@.pg_qualstats_names(
   OUT userid oid,
   OUT dbid oid,
   OUT lrelid oid,
@@ -227,16 +227,16 @@ LANGUAGE C STRICT VOLATILE;
 
   This view is just a simple wrapper on the :func:`pg_qualstats()` function, filtering on the current database for convenience.
 */
-CREATE VIEW pg_qualstats AS
-  SELECT qs.* FROM pg_qualstats() qs
+CREATE VIEW @extschema@.pg_qualstats AS
+  SELECT qs.* FROM @extschema@.pg_qualstats() qs
   INNER JOIN pg_database on qs.dbid = pg_database.oid
   WHERE pg_database.datname = current_database();
 
 
-GRANT SELECT ON pg_qualstats TO PUBLIC;
+GRANT SELECT ON @extschema@.pg_qualstats TO PUBLIC;
 
 -- Don't want this to be available to non-superusers.
-REVOKE ALL ON FUNCTION pg_qualstats_reset() FROM PUBLIC;
+REVOKE ALL ON FUNCTION @extschema@.pg_qualstats_reset() FROM PUBLIC;
 
 /*"""
 .. view:: pg_qualstats_pretty
@@ -263,7 +263,7 @@ REVOKE ALL ON FUNCTION pg_qualstats_reset() FROM PUBLIC;
     nbfiltered (bigint):
       the total number of tuples filtered by this qual.
 */
-CREATE VIEW pg_qualstats_pretty AS
+CREATE VIEW @extschema@.pg_qualstats_pretty AS
   select
         nl.nspname as left_schema,
         al.attrelid::regclass as left_table,
@@ -275,7 +275,7 @@ CREATE VIEW pg_qualstats_pretty AS
         sum(occurences) as occurences,
         sum(execution_count) as execution_count,
         sum(nbfiltered) as nbfiltered
-  from pg_qualstats qs
+  from @extschema@.pg_qualstats qs
   left join (pg_class cl inner join pg_namespace nl on nl.oid = cl.relnamespace) on cl.oid = qs.lrelid
   left join (pg_class cr inner join pg_namespace nr on nr.oid = cr.relnamespace) on cr.oid = qs.rrelid
   left join pg_attribute al on al.attrelid = qs.lrelid and al.attnum = qs.lattnum
@@ -284,7 +284,7 @@ CREATE VIEW pg_qualstats_pretty AS
 ;
 
 
-CREATE OR REPLACE VIEW pg_qualstats_all AS
+CREATE OR REPLACE VIEW @extschema@.pg_qualstats_all AS
   SELECT dbid, relid, userid, queryid, array_agg(distinct attnum) as attnums,
     opno, max(qualid) as qualid, sum(occurences) as occurences,
     sum(execution_count) as execution_count, sum(nbfiltered) as nbfiltered,
@@ -306,7 +306,7 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
           qs.execution_count as execution_count,
           qs.nbfiltered as nbfiltered,
           qs.queryid
-    FROM pg_qualstats() qs
+    FROM @extschema@.pg_qualstats() qs
     WHERE lrelid IS NOT NULL or rrelid IS NOT NULL
   ) t GROUP BY dbid, relid, userid, queryid, opno, coalesce(qualid, qualnodeid)
 ;
@@ -325,7 +325,7 @@ CREATE OR REPLACE VIEW pg_qualstats_all AS
     eval_type (char):
       the evaluation type. See :func:`pg_qualstats()` for an explanation of the eval_type.
 */
-CREATE TYPE qual AS (
+CREATE TYPE @extschema@.qual AS (
   relid oid,
   attnum integer,
   opno oid,
@@ -348,16 +348,16 @@ CREATE TYPE qual AS (
     eval_type (char):
       the evaluation type. See :func:`pg_qualstats()` for an explanation of the eval_type.
 */
-CREATE TYPE qualname AS (
+CREATE TYPE @extschema@.qualname AS (
   relname text,
   attnname text,
   opname text,
   eval_type "char"
 );
 
-CREATE OR REPLACE VIEW pg_qualstats_by_query AS
+CREATE OR REPLACE VIEW @extschema@.pg_qualstats_by_query AS
         SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, occurences, execution_count, nbfiltered, queryid,
-      array_agg(constvalue order by constant_position) as constvalues, array_agg(ROW(relid, attnum, opno, eval_type)::qual) as quals
+      array_agg(constvalue order by constant_position) as constvalues, array_agg(ROW(relid, attnum, opno, eval_type)::@extschema@.qual) as quals
       FROM
       (
 
@@ -382,12 +382,12 @@ CREATE OR REPLACE VIEW pg_qualstats_by_query AS
             qs.nbfiltered as nbfiltered,
             qs.eval_type,
             qs.constant_position
-        FROM pg_qualstats() qs
+        FROM @extschema@.pg_qualstats() qs
         WHERE (qs.lrelid IS NULL) != (qs.rrelid IS NULL)
     ) i GROUP BY coalesce(uniquequalid, uniquequalnodeid), coalesce(qualid, qualnodeid),  dbid, userid, occurences, execution_count, nbfiltered, queryid
 ;
 
-CREATE OR REPLACE FUNCTION pg_qualstats_deparse_qual(qual qual) RETURNS TEXT
+CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_deparse_qual(qual qual) RETURNS TEXT
 AS $_$
     SELECT pg_catalog.format('%I.%I %s ?',
         c.oid::regclass, a.attname, o.oprname)
@@ -398,18 +398,18 @@ AS $_$
     AND a.attnum = qual.attnum
 $_$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION pg_qualstats_get_qualnode_rel(bigint)
+CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_get_qualnode_rel(bigint)
 RETURNS TEXT
 AS $_$
     SELECT pg_catalog.quote_ident(n.nspname) || '.'
       || pg_catalog.quote_ident(c.relname)
-    FROM pg_qualstats() q
+    FROM @extschema@.pg_qualstats() q
     JOIN pg_catalog.pg_class c ON coalesce(q.lrelid, q.rrelid) = c.oid
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     WHERE q.qualnodeid = $1
 $_$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION pg_qualstats_get_idx_col(bigint,
+CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_get_idx_col(bigint,
     include_nondefault_opclass boolean = true)
 RETURNS TEXT
 AS $_$
@@ -421,7 +421,7 @@ AS $_$
     ELSE
     ''
     END
-    FROM pg_qualstats() q
+    FROM @extschema@.pg_qualstats() q
     JOIN pg_catalog.pg_class c ON coalesce(q.lrelid, q.rrelid) = c.oid
     JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
       AND a.attnum = coalesce(q.lattnum, q.rattnum)
@@ -435,7 +435,7 @@ AS $_$
     ORDER BY CASE opcdefault WHEN true THEN 0 ELSE 1 END;
 $_$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION pg_qualstats_index_advisor (
+CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_index_advisor (
     min_filter integer DEFAULT 1000,
     min_selectivity integer DEFAULT 30,
     forbidden_am text[] DEFAULT '{}')
@@ -472,8 +472,8 @@ BEGIN
     -- first find out unoptimizable quals
     FOR rec IN SELECT DISTINCT qualnodeid,
         (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
-          opno, eval_type)::qual AS qual
-      FROM pg_qualstats() q
+          opno, eval_type)::@extschema@.qual AS qual
+      FROM @extschema@.pg_qualstats() q
       JOIN pg_catalog.pg_database d ON q.dbid = d.oid
       LEFT JOIN pg_catalog.pg_operator op ON op.oid = q.opno
       LEFT JOIN pg_catalog.pg_amop amop ON amop.amopopr = op.oid
@@ -484,7 +484,7 @@ BEGIN
        AND amname IS NULL
     LOOP
       v_unoptimised := pg_catalog.array_append(v_unoptimised,
-        pg_qualstats_deparse_qual(rec.qual));
+        @extschema@.pg_qualstats_deparse_qual(rec.qual));
       v_processed := pg_catalog.array_append(v_processed, rec.qualnodeid);
     END LOOP;
 
@@ -502,7 +502,7 @@ BEGIN
         WITH pgqs AS (
           SELECT dbid, amname, qualid, qualnodeid,
             (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
-            opno, eval_type)::qual AS qual,
+            opno, eval_type)::@extschema@.qual AS qual,
             round(avg(execution_count)) AS execution_count,
             sum(occurences) AS occurences,
             round(sum(nbfiltered)::numeric / sum(occurences)) AS avg_filter,
@@ -510,7 +510,7 @@ BEGIN
               THEN 0
               ELSE round(sum(nbfiltered::numeric) / sum(execution_count) * 100)
             END AS avg_selectivity
-          FROM pg_qualstats() q
+          FROM @extschema@.pg_qualstats() q
           JOIN pg_catalog.pg_database d ON q.dbid = d.oid
           JOIN pg_catalog.pg_operator op ON op.oid = q.opno
           JOIN pg_catalog.pg_amop amop ON amop.amopopr = op.oid
@@ -614,7 +614,7 @@ BEGIN
           CONTINUE WHEN v_quals_done @> ARRAY[v_qualnodeid];
 
           -- skip other quals for the same column
-          v_col := pg_qualstats_get_idx_col(v_qualnodeid, false);
+          v_col := @extschema@.pg_qualstats_get_idx_col(v_qualnodeid, false);
           CONTINUE WHEN v_quals_col_done @> ARRAY[v_col];
 
           -- mark this qual as present in a generated index so it's ignore at
@@ -630,7 +630,7 @@ BEGIN
 
           -- append the column to the index
           IF v_ddl != '' THEN v_ddl := v_ddl || ', '; END IF;
-          v_ddl := v_ddl || pg_qualstats_get_idx_col(v_qualnodeid, true);
+          v_ddl := v_ddl || @extschema@.pg_qualstats_get_idx_col(v_qualnodeid, true);
         END LOOP;
 
         -- if underlying table has been dropped, skip this (broken) index
@@ -638,7 +638,7 @@ BEGIN
 
         -- generate the full CREATE INDEX ddl
         v_ddl = pg_catalog.format('CREATE INDEX ON %s USING %I (%s)',
-          pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
+          @extschema@.pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
 
         -- and append it to the list of generated indexes
         v_indexes := array_append(v_indexes, v_ddl);

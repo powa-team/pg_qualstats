@@ -1,6 +1,7 @@
-CREATE EXTENSION pg_qualstats;
+CREATE SCHEMA "PGQS";
+CREATE EXTENSION pg_qualstats WITH SCHEMA "PGQS";
 -- Make sure that installcheck won't find previous data
-SELECT pg_qualstats_reset();
+SELECT "PGQS".pg_qualstats_reset();
  pg_qualstats_reset 
 --------------------
  
@@ -17,37 +18,37 @@ SELECT COUNT(*) FROM pgqs WHERE id = 1;
 
 SELECT lrelid::regclass::text, lattnum, occurences, execution_count,
     nbfiltered, constvalue, eval_type
-FROM pg_qualstats;
+FROM "PGQS".pg_qualstats;
  lrelid | lattnum | occurences | execution_count | nbfiltered | constvalue | eval_type 
 --------+---------+------------+-----------------+------------+------------+-----------
  pgqs   |       1 |          1 |             100 |         99 | 1::integer | f
 (1 row)
 
-SELECT COUNT(*) > 0 FROM pg_qualstats;
+SELECT COUNT(*) > 0 FROM "PGQS".pg_qualstats;
  ?column? 
 ----------
  t
 (1 row)
 
-SELECT COUNT(*) > 0 FROM pg_qualstats();
+SELECT COUNT(*) > 0 FROM "PGQS".pg_qualstats();
  ?column? 
 ----------
  t
 (1 row)
 
-SELECT COUNT(*) > 0 FROM pg_qualstats_example_queries();
+SELECT COUNT(*) > 0 FROM "PGQS".pg_qualstats_example_queries();
  ?column? 
 ----------
  t
 (1 row)
 
-SELECT pg_qualstats_reset();
+SELECT "PGQS".pg_qualstats_reset();
  pg_qualstats_reset 
 --------------------
  
 (1 row)
 
-SELECT COUNT(*) FROM pg_qualstats();
+SELECT COUNT(*) FROM "PGQS".pg_qualstats();
  count 
 -------
      0
@@ -60,7 +61,7 @@ SELECT * FROM (SELECT * FROM pgqs LIMIT 0) pgqs WHERE pgqs.id = 0;
 ----+-----
 (0 rows)
 
-SELECT COUNT(*) FROM pg_qualstats();
+SELECT COUNT(*) FROM "PGQS".pg_qualstats();
  count 
 -------
      0
@@ -72,13 +73,13 @@ SELECT * FROM pgqs WHERE 'meh' ~ val;
 ----+-----
 (0 rows)
 
-SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM pg_qualstats();
+SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum FROM "PGQS".pg_qualstats();
  lrelid | lattnum | rrelid | rattnum 
 --------+---------+--------+---------
         |         | pgqs   |       2
 (1 row)
 
-SELECT pg_qualstats_reset();
+SELECT "PGQS".pg_qualstats_reset();
  pg_qualstats_reset 
 --------------------
  
@@ -95,7 +96,7 @@ SELECT * FROM pgqs WHERE 3 = id % 2;
 ----+-----
 (0 rows)
 
-SELECT COUNT(*) FROM pg_qualstats();
+SELECT COUNT(*) FROM "PGQS".pg_qualstats();
  count 
 -------
      0
@@ -113,21 +114,21 @@ SELECT * FROM pgqs WHERE 0 = id;
 (0 rows)
 
 SELECT lrelid::regclass, lattnum, rrelid::regclass, rattnum, sum(occurences)
-FROM pg_qualstats()
+FROM "PGQS".pg_qualstats()
 GROUP by 1, 2, 3, 4;
  lrelid | lattnum | rrelid | rattnum | sum 
 --------+---------+--------+---------+-----
  pgqs   |       1 |        |         |   2
 (1 row)
 
-SELECT COUNT(DISTINCT qualnodeid) FROM pg_qualstats();
+SELECT COUNT(DISTINCT qualnodeid) FROM "PGQS".pg_qualstats();
  count 
 -------
      1
 (1 row)
 
 -- (unique)qualid behavior
-SELECT pg_qualstats_reset();
+SELECT "PGQS".pg_qualstats_reset();
  pg_qualstats_reset 
 --------------------
  
@@ -140,7 +141,8 @@ SELECT COUNT(*) FROM pgqs WHERE (id = 1) OR (id > 10 AND id < 20);
     10
 (1 row)
 
-SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*) FROM pg_qualstats() GROUP BY 1 ORDER BY 2 DESC;
+SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*)
+FROM "PGQS".pg_qualstats() GROUP BY 1 ORDER BY 2 DESC;
   kind  | count 
 --------+-------
  AND-ed |     2
@@ -150,7 +152,7 @@ SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*) FR
 -- index advisor
 CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
 INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;
-SELECT pg_qualstats_reset();
+SELECT "PGQS".pg_qualstats_reset();
  pg_qualstats_reset 
 --------------------
  
@@ -205,7 +207,7 @@ SELECT COUNT(*) FROM pgqs WHERE id = 1;
 
 SELECT v
   FROM json_array_elements(
-    pg_qualstats_index_advisor(50)->'indexes') v
+    "PGQS".pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
                                v                               
 ---------------------------------------------------------------
@@ -216,7 +218,7 @@ SELECT v
 
 SELECT v
   FROM json_array_elements(
-    pg_qualstats_index_advisor(50)->'unoptimised') v
+    "PGQS".pg_qualstats_index_advisor(50)->'unoptimised') v
   ORDER BY v::text COLLATE "C";
         v        
 -----------------
@@ -227,7 +229,7 @@ SELECT v
 DROP TABLE pgqs;
 SELECT v
   FROM json_array_elements(
-    pg_qualstats_index_advisor(50)->'indexes') v
+    "PGQS".pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
                                v                               
 ---------------------------------------------------------------
