@@ -355,6 +355,11 @@ CREATE TYPE @extschema@.qualname AS (
   eval_type "char"
 );
 
+CREATE TYPE @extschema@.adv_quals AS (
+    qualnodeids bigint[],
+    queryids bigint[]
+);
+
 CREATE OR REPLACE VIEW @extschema@.pg_qualstats_by_query AS
         SELECT coalesce(uniquequalid, uniquequalnodeid) as uniquequalnodeid, dbid, userid,  coalesce(qualid, qualnodeid) as qualnodeid, occurences, execution_count, nbfiltered, queryid,
       array_agg(constvalue order by constant_position) as constvalues, array_agg(ROW(relid, attnum, opno, eval_type)::@extschema@.qual) as quals
@@ -444,8 +449,8 @@ AS $_$
 DECLARE
     v_res json;
     v_processed bigint[] = '{}';
-    v_indexes text[] = '{}';
-    v_unoptimised text[] = '{}';
+    v_indexes json[];
+    v_unoptimised json;
 
     rec record;
     v_nb_processed integer = 1;
@@ -454,9 +459,11 @@ DECLARE
     v_col text;
     v_cur json;
     v_qualnodeid bigint;
+    v_queryid text;
     v_quals_todo bigint[];
     v_quals_done bigint[];
     v_quals_col_done text[];
+    v_queryids bigint[] = '{}';
 BEGIN
     -- sanity checks and default values
     SELECT coalesce(min_filter, 1000), coalesce(min_selectivity, 30),
@@ -470,9 +477,10 @@ BEGIN
     END IF;
 
     -- first find out unoptimizable quals
-    FOR rec IN SELECT DISTINCT qualnodeid,
+    --FOR rec IN SELECT DISTINCT qualnodeid,
+    WITH src AS (SELECT DISTINCT qualnodeid,
         (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
-          opno, eval_type)::@extschema@.qual AS qual
+          opno, eval_type)::@extschema@.qual AS qual, queryid
       FROM @extschema@.pg_qualstats() q
       JOIN pg_catalog.pg_database d ON q.dbid = d.oid
       LEFT JOIN pg_catalog.pg_operator op ON op.oid = q.opno
@@ -481,12 +489,16 @@ BEGIN
       WHERE d.datname = current_database()
        AND eval_type = 'f'
        AND coalesce(lrelid, rrelid) != 0
-       AND amname IS NULL
-    LOOP
-      v_unoptimised := pg_catalog.array_append(v_unoptimised,
-        @extschema@.pg_qualstats_deparse_qual(rec.qual));
-      v_processed := pg_catalog.array_append(v_processed, rec.qualnodeid);
-    END LOOP;
+       AND amname IS NULL)
+    SELECT pg_catalog.json_build_object(
+            'quals', pg_catalog.array_agg(@extschema@.pg_qualstats_deparse_qual(qual)),
+            -- be careful to generate an empty array if no queryid availiable
+            'queryids', coalesce(pg_catalog.array_agg(DISTINCT queryid)
+                FILTER (WHERE queryid IS NOT NULL), '{}')
+        ),
+        pg_catalog.array_agg(qualnodeid)
+    FROM src
+    INTO v_unoptimised, v_processed;
 
     -- The index suggestion is done in multiple iteration, by scoring for each
     -- relation containing interesting quals a path of possibly AND-ed quals
@@ -502,7 +514,7 @@ BEGIN
         WITH pgqs AS (
           SELECT dbid, amname, qualid, qualnodeid,
             (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
-            opno, eval_type)::@extschema@.qual AS qual,
+            opno, eval_type)::@extschema@.qual AS qual, queryid,
             round(avg(execution_count)) AS execution_count,
             sum(occurences) AS occurences,
             round(sum(nbfiltered)::numeric / sum(occurences)) AS avg_filter,
@@ -521,12 +533,15 @@ BEGIN
           AND coalesce(lrelid, rrelid) != 0
           AND qualnodeid != ALL(v_processed)
           GROUP BY dbid, amname, qualid, qualnodeid, lrelid, rrelid,
-            lattnum, rattnum, opno, eval_type
+            lattnum, rattnum, opno, eval_type, queryid
         ),
         -- apply cardinality and selectivity restrictions
         filtered AS (
           SELECT (qual).relid, amname, coalesce(qualid, qualnodeid) AS parent,
-            count(*) AS weight, array_agg(qualnodeid) AS quals
+            count(*) AS weight,
+            (array_agg(qualnodeid),
+             array_agg(queryid)
+            )::@extschema@.adv_quals AS quals
           FROM pgqs
           WHERE avg_filter >= min_filter
           AND avg_selectivity >= min_selectivity
@@ -537,24 +552,28 @@ BEGIN
           SELECT p.relid, p.amname, p.parent, p.quals,
             c.quals AS children
           FROM filtered p
-          LEFT JOIN filtered c ON p.quals @> c.quals
+          LEFT JOIN filtered c ON (p.quals).qualnodeids @> (c.quals).qualnodeids
             AND p.amname = c.amname
             AND p.parent != c.parent
-            AND p.quals != c.quals
+            AND (p.quals).qualnodeids != (c.quals).qualnodeids
         ),
         -- build the "paths", which is the list of AND-ed quals that entirely
         -- contains another possibly AND-ed quals, and give a score for each
         -- path.  The scoring method used here is simply the number of
         -- columns in the quals.
         paths AS (
-          SELECT DISTINCT *, coalesce(pg_catalog.array_length(children, 1), 0) AS weight
+          SELECT DISTINCT *,
+            coalesce(pg_catalog.array_length((children).qualnodeids, 1),
+                     0) AS weight
           FROM nodes
           UNION
           SELECT DISTINCT p.relid, p.amname, p.parent, p.quals, c.children,
-            coalesce(pg_catalog.array_length(c.children, 1), 0) AS weight
+            coalesce(pg_catalog.array_length((c.children).qualnodeids, 1),
+                     0) AS weight
           FROM nodes p
-          JOIN nodes c ON p.children @> c.quals AND c.quals IS NOT NULL
-            AND c.quals != p.quals
+          JOIN nodes c ON (p.children).qualnodeids @> (c.quals).qualnodeids
+            AND (c.quals).qualnodeids IS NOT NULL
+            AND (c.quals).qualnodeids != (p.quals).qualnodeids
             AND p.amname = c.amname
         ),
         -- compute the final paths.
@@ -569,7 +588,8 @@ BEGIN
           SELECT relid, amname, parent, quals,
             array_agg(to_json(children) ORDER BY weight)
               FILTER (WHERE children IS NOT NULL) AS included,
-            pg_catalog.array_length(quals, 1) + sum(weight) AS path_weight,
+            pg_catalog.array_length((quals).qualnodeids, 1)
+                + sum(weight) AS path_weight,
           CASE amname WHEN 'btree' THEN 1 ELSE 2 END AS amweight
           FROM paths
           GROUP BY relid, amname, parent, quals
@@ -583,7 +603,9 @@ BEGIN
           FROM computed
         )
         -- and finally choose the higher rank final path for each relation.
-        SELECT relid, amname, parent, quals, included, path_weight
+        SELECT relid, amname, parent,
+            (quals).qualnodeids as quals, (quals).queryids as queryids,
+            included, path_weight
         FROM final
         WHERE rownum = 1
       LOOP
@@ -598,7 +620,7 @@ BEGIN
         IF rec.included IS NOT NULL THEN
           FOREACH v_cur IN ARRAY rec.included LOOP
             -- Direct cast from json to bigint is only possible since pg10
-            FOR v_qualnodeid IN SELECT pg_catalog.json_array_elements(v_cur)::text::bigint
+            FOR v_qualnodeid IN SELECT pg_catalog.json_array_elements(v_cur->'qualnodeids')::text::bigint
             LOOP
               v_quals_todo := v_quals_todo || v_qualnodeid;
             END LOOP;
@@ -640,14 +662,43 @@ BEGIN
         v_ddl = pg_catalog.format('CREATE INDEX ON %s USING %I (%s)',
           @extschema@.pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
 
-        -- and append it to the list of generated indexes
-        v_indexes := array_append(v_indexes, v_ddl);
+        -- get the underlyings queryid(s)
+        v_queryids = rec.queryids;
+        IF rec.included IS NOT NULL THEN
+          FOREACH v_cur IN ARRAY rec.included LOOP
+            -- Direct cast from json to bigint is only possible since pg10
+            FOR v_queryid IN SELECT pg_catalog.json_array_elements(v_cur->'queryids')::text
+            LOOP
+              CONTINUE WHEN v_queryid = 'null';
+              v_queryids := v_queryids || v_queryid::text::bigint;
+            END LOOP;
+          END LOOP;
+        END IF;
+
+        -- remove any duplicates
+        SELECT pg_catalog.array_agg(DISTINCT v) INTO v_queryids
+            FROM (SELECT unnest(v_queryids)) s(v);
+
+        -- sanitize the queryids
+        IF v_queryids IS NULL OR v_queryids = '{null}' THEN
+            v_queryids = '{}';
+        END IF;
+
+        -- and finally append the index to the list of generated indexes
+        v_indexes := pg_catalog.array_append(v_indexes,
+            pg_catalog.json_build_object(
+                'ddl', v_ddl,
+                'queryids', v_queryids
+            )
+        );
       END LOOP;
     END LOOP;
 
-    v_res := pg_catalog.json_build_object('indexes', v_indexes,
-        'unoptimised', v_unoptimised);
+    v_res := pg_catalog.json_build_object(
+        'indexes', v_indexes,
+        'unoptimised', v_unoptimised
+    );
 
     RETURN v_res;
 END;
-$_$ LANGUAGE plpgsql;
+$_$ LANGUAGE plpgsql;       /* end of pg_qualstats_index_advisor */

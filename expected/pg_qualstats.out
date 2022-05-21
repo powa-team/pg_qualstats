@@ -205,7 +205,7 @@ SELECT COUNT(*) FROM pgqs WHERE id = 1;
      1
 (1 row)
 
-SELECT v
+SELECT v->'ddl' AS v
   FROM json_array_elements(
     "PGQS".pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
@@ -218,7 +218,7 @@ SELECT v
 
 SELECT v
   FROM json_array_elements(
-    "PGQS".pg_qualstats_index_advisor(50)->'unoptimised') v
+    "PGQS".pg_qualstats_index_advisor(50)->'unoptimised'->'quals') v
   ORDER BY v::text COLLATE "C";
         v        
 -----------------
@@ -227,7 +227,7 @@ SELECT v
 
 -- check quals on removed table
 DROP TABLE pgqs;
-SELECT v
+SELECT v->'ddl' AS v
   FROM json_array_elements(
     "PGQS".pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
