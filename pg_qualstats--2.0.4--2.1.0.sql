@@ -8,19 +8,16 @@ CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_index_advisor (
     RETURNS json
 AS $_$
 DECLARE
-    v_res json;
     v_processed bigint[] = '{}';
     v_indexes json[];
-    v_unoptimised json;
+    v_unoptimised json[];
 
     rec record;
     v_nb_processed integer = 1;
 
     v_ddl text;
     v_col text;
-    v_cur json;
     v_qualnodeid bigint;
-    v_queryid text;
     v_quals_todo bigint[];
     v_quals_done bigint[];
     v_quals_col_done text[];
@@ -37,11 +34,15 @@ BEGIN
         forbidden_am := array_append(forbidden_am, 'hash');
     END IF;
 
-    -- first find out unoptimizable quals
-    --FOR rec IN SELECT DISTINCT qualnodeid,
-    WITH src AS (SELECT DISTINCT qualnodeid,
+    -- first find out unoptimizable quals.
+    -- We need an array of json containing the per-qual info, and a single
+    -- array containing all the underlying qualnodeids, so we need to create
+    -- the wanted final object manually as we can't have two different grouping
+    -- approach.
+    FOR rec IN WITH src AS (SELECT DISTINCT qualnodeid,
         (coalesce(lrelid, rrelid), coalesce(lattnum, rattnum),
-          opno, eval_type)::@extschema@.qual AS qual, queryid
+          opno, eval_type)::@extschema@.qual AS qual,
+          queryid
       FROM @extschema@.pg_qualstats() q
       JOIN pg_catalog.pg_database d ON q.dbid = d.oid
       LEFT JOIN pg_catalog.pg_operator op ON op.oid = q.opno
@@ -50,16 +51,22 @@ BEGIN
       WHERE d.datname = current_database()
        AND eval_type = 'f'
        AND coalesce(lrelid, rrelid) != 0
-       AND amname IS NULL)
+       AND amname IS NULL
+    )
     SELECT pg_catalog.json_build_object(
-            'quals', pg_catalog.array_agg(@extschema@.pg_qualstats_deparse_qual(qual)),
+            'qual', @extschema@.pg_qualstats_deparse_qual(qual),
             -- be careful to generate an empty array if no queryid availiable
-            'queryids', coalesce(pg_catalog.array_agg(DISTINCT queryid)
+            'queryids',
+            coalesce(pg_catalog.array_agg(DISTINCT queryid)
                 FILTER (WHERE queryid IS NOT NULL), '{}')
-        ),
-        pg_catalog.array_agg(qualnodeid)
+        ) AS obj,
+        array_agg(qualnodeid) AS qualnodeids
     FROM src
-    INTO v_unoptimised, v_processed;
+    GROUP BY qual
+    LOOP
+        v_unoptimised := array_append(v_unoptimised, rec.obj);
+        v_processed := array_cat(v_processed, rec.qualnodeids);
+    END LOOP;
 
     -- The index suggestion is done in multiple iteration, by scoring for each
     -- relation containing interesting quals a path of possibly AND-ed quals
@@ -178,15 +185,20 @@ BEGIN
         v_quals_col_done := '{}';
 
         -- put columns from included quals, if any, first for order dependency
-        IF rec.included IS NOT NULL THEN
-          FOREACH v_cur IN ARRAY rec.included LOOP
-            -- Direct cast from json to bigint is only possible since pg10
-            FOR v_qualnodeid IN SELECT pg_catalog.json_array_elements(v_cur->'qualnodeids')::text::bigint
-            LOOP
-              v_quals_todo := v_quals_todo || v_qualnodeid;
-            END LOOP;
-          END LOOP;
-        END IF;
+        DECLARE
+            v_cur json;
+        BEGIN
+            IF rec.included IS NOT NULL THEN
+              FOREACH v_cur IN ARRAY rec.included LOOP
+                -- Direct cast from json to bigint is only possible since pg10
+                FOR v_qualnodeid IN
+                    SELECT pg_catalog.json_array_elements(v_cur->'qualnodeids')::text::bigint
+                LOOP
+                  v_quals_todo := v_quals_todo || v_qualnodeid;
+                END LOOP;
+              END LOOP;
+            END IF;
+        END;
 
         -- and append qual's own columns
         v_quals_todo := v_quals_todo || rec.quals;
@@ -224,17 +236,22 @@ BEGIN
           @extschema@.pg_qualstats_get_qualnode_rel(v_qualnodeid), rec.amname, v_ddl);
 
         -- get the underlyings queryid(s)
-        v_queryids = rec.queryids;
-        IF rec.included IS NOT NULL THEN
-          FOREACH v_cur IN ARRAY rec.included LOOP
-            -- Direct cast from json to bigint is only possible since pg10
-            FOR v_queryid IN SELECT pg_catalog.json_array_elements(v_cur->'queryids')::text
-            LOOP
-              CONTINUE WHEN v_queryid = 'null';
-              v_queryids := v_queryids || v_queryid::text::bigint;
-            END LOOP;
-          END LOOP;
-        END IF;
+        DECLARE
+            v_queryid text;
+            v_cur json;
+        BEGIN
+            v_queryids = rec.queryids;
+            IF rec.included IS NOT NULL THEN
+              FOREACH v_cur IN ARRAY rec.included LOOP
+                -- Direct cast from json to bigint is only possible since pg10
+                FOR v_queryid IN SELECT pg_catalog.json_array_elements(v_cur->'queryids')::text
+                LOOP
+                  CONTINUE WHEN v_queryid = 'null';
+                  v_queryids := v_queryids || v_queryid::text::bigint;
+                END LOOP;
+              END LOOP;
+            END IF;
+        END;
 
         -- remove any duplicates
         SELECT pg_catalog.array_agg(DISTINCT v) INTO v_queryids
@@ -255,11 +272,8 @@ BEGIN
       END LOOP;
     END LOOP;
 
-    v_res := pg_catalog.json_build_object(
+    RETURN pg_catalog.json_build_object(
         'indexes', v_indexes,
-        'unoptimised', v_unoptimised
-    );
-
-    RETURN v_res;
+        'unoptimised', v_unoptimised);
 END;
 $_$ LANGUAGE plpgsql;       /* end of pg_qualstats_index_advisor */
