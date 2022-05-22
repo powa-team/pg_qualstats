@@ -54,15 +54,20 @@ SELECT * FROM adv WHERE id1 = 0 and val = 'meh';
 SELECT * FROM adv WHERE id1 = 1 and val = 'meh';
 SELECT * FROM adv WHERE id1 = 1 and id2 = 2 AND val = 'meh';
 SELECT * FROM adv WHERE id1 = 6 and id2 = 6 AND id3 = 6 AND val = 'meh';
-SELECT * FROM adv WHERE val ILIKE 'moh';
 SELECT COUNT(*) FROM pgqs WHERE id = 1;
+-- non optimisable statements
+SELECT * FROM adv WHERE val ILIKE 'moh';
+SELECT count(*) FROM adv WHERE val ILIKE 'moh';
+SELECT * FROM adv WHERE val LIKE 'moh';
+
+-- check the results
 SELECT v->'ddl' AS v
   FROM json_array_elements(
     "PGQS".pg_qualstats_index_advisor(50)->'indexes') v
   ORDER BY v::text COLLATE "C";
-SELECT v
+SELECT v->'qual' AS v
   FROM json_array_elements(
-    "PGQS".pg_qualstats_index_advisor(50)->'unoptimised'->'quals') v
+    "PGQS".pg_qualstats_index_advisor(50)->'unoptimised') v
   ORDER BY v::text COLLATE "C";
 -- check quals on removed table
 DROP TABLE pgqs;
