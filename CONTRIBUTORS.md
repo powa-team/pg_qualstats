@@ -16,3 +16,4 @@
   * github user suprimex
   * github user RekGRpth
   * Zhihong Yu
+  * github user romanstingler

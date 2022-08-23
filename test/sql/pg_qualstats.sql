@@ -43,7 +43,14 @@ SELECT COUNT(*) FROM pgqs WHERE (id = 1) OR (id > 10 AND id < 20);
 SELECT CASE WHEN qualid IS NULL THEN 'OR-ed' ELSE 'AND-ed' END kind, COUNT(*)
 FROM "PGQS".pg_qualstats() GROUP BY 1 ORDER BY 2 DESC;
 
+----------------
 -- index advisor
+----------------
+
+-- check that empty arrays are returned rather than NULL values
+SELECT "PGQS".pg_qualstats_reset();
+SELECT * FROM "PGQS".pg_qualstats_index_advisor(50);
+-- Test some naive scenario
 CREATE TABLE adv (id1 integer, id2 integer, id3 integer, val text);
 INSERT INTO adv SELECT i, i, i, 'line ' || i from generate_series(1, 1000) i;
 SELECT "PGQS".pg_qualstats_reset();

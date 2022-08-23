@@ -9,8 +9,8 @@ CREATE OR REPLACE FUNCTION @extschema@.pg_qualstats_index_advisor (
 AS $_$
 DECLARE
     v_processed bigint[] = '{}';
-    v_indexes json[];
-    v_unoptimised json[];
+    v_indexes json[] = '{}';
+    v_unoptimised json[] = '{}';
 
     rec record;
     v_nb_processed integer = 1;
