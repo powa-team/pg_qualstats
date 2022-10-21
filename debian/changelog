@@ -1,3 +1,10 @@
+pg-qualstats (2.0.4-2) unstable; urgency=medium
+
+  * Upload for PostgreSQL 15.
+  * debian/watch: Look at GitHub tags instead of releases.
+
+ -- Christoph Berg <myon@debian.org>  Fri, 21 Oct 2022 10:53:59 +0200
+
 pg-qualstats (2.0.4-1) unstable; urgency=medium
 
   * New upstream version with support for PostgreSQL 15.
