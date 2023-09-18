@@ -1,3 +1,11 @@
+2.1.0
+  New feature:
+    - Allow custom schema at extension creation time (Julien Rouhaud)
+    - Report the queryid in the index advisor (Julien Rouhaud, thanks to
+      Zhihong Yu for the request)
+  Bugfix:
+    - Mark the extension as not relocatable as it internally references the
+      extension schema (Julien Rouhaud)
 2.0.4
   Bugfix:
     - Fix memory allocation for PostgreSQL 12 and above (Julien Rouhaud)
