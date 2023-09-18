@@ -1,2 +1,2 @@
 version=4
-https://github.com/powa-team/pg_qualstats/releases .*/([0-9].*).tar.gz
+https://github.com/powa-team/pg_qualstats/tags .*/([0-9.]*).tar.gz
