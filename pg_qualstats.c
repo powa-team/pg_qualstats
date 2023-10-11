@@ -731,6 +731,8 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		HASHCTL		info;
 		pgqsEntry  *localentry;
 		HASH_SEQ_STATUS local_hash_seq;
+		/* We need to switch to the per-query memory context */
+		MemoryContext oldcxt = MemoryContextSwitchTo(queryDesc->estate->es_query_cxt);
 		pgqsWalkerContext *context = palloc(sizeof(pgqsWalkerContext));
 
 		context->queryId = queryDesc->plannedstmt->queryId;
@@ -851,6 +853,7 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 
 			PGQS_LWL_RELEASE(pgqs->lock);
 		}
+		MemoryContextSwitchTo(oldcxt);
 	}
 
 	if (prev_ExecutorEnd)
