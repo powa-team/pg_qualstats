@@ -2198,7 +2198,6 @@ pg_qualstats_common(PG_FUNCTION_ARGS, pgqsVersion api_version,
 	}
 
 	PGQS_LWL_RELEASE(pgqs->lock);
-	tuplestore_donestoring(tupstore);
 	MemoryContextSwitchTo(oldcontext);
 
 	return (Datum) 0;
