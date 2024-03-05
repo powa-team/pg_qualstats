@@ -526,7 +526,11 @@ pgqs_set_query_sampled(bool sample)
 
 	/* in worker processes we need to get the info from shared memory */
 	LWLockAcquire(pgqs->sampledlock, LW_EXCLUSIVE);
+#if PG_VERSION_NUM >= 170000
+	pgqs->sampled[MyProcNumber] = sample;
+#else
 	pgqs->sampled[MyBackendId] = sample;
+#endif
 	LWLockRelease(pgqs->sampledlock);
 }
 #endif
@@ -547,7 +551,11 @@ pgqs_is_query_sampled(void)
 
 	/* in worker processes we need to get the info from shared memory */
 	PGQS_LWL_ACQUIRE(pgqs->sampledlock, LW_SHARED);
+#if PG_VERSION_NUM >= 170000
+	sampled = pgqs->sampled[ParallelLeaderProcNumber];
+#else
 	sampled = pgqs->sampled[ParallelLeaderBackendId];
+#endif
 	PGQS_LWL_RELEASE(pgqs->sampledlock);
 
 	return sampled;
