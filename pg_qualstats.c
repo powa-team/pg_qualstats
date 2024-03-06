@@ -100,6 +100,11 @@ PG_MODULE_MAGIC;
 	LWLockRelease(lock); \
 	}
 
+#if PG_VERSION_NUM < 170000
+#define MyProcNumber MyBackendId
+#define ParallelLeaderProcNumber ParallelLeaderBackendId
+#endif
+
 #if PG_VERSION_NUM < 140000
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
@@ -526,7 +531,7 @@ pgqs_set_query_sampled(bool sample)
 
 	/* in worker processes we need to get the info from shared memory */
 	LWLockAcquire(pgqs->sampledlock, LW_EXCLUSIVE);
-	pgqs->sampled[MyBackendId] = sample;
+	pgqs->sampled[MyProcNumber] = sample;
 	LWLockRelease(pgqs->sampledlock);
 }
 #endif
@@ -547,7 +552,7 @@ pgqs_is_query_sampled(void)
 
 	/* in worker processes we need to get the info from shared memory */
 	PGQS_LWL_ACQUIRE(pgqs->sampledlock, LW_SHARED);
-	sampled = pgqs->sampled[ParallelLeaderBackendId];
+	sampled = pgqs->sampled[ParallelLeaderProcNumber];
 	PGQS_LWL_RELEASE(pgqs->sampledlock);
 
 	return sampled;
