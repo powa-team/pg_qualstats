@@ -1,0 +1,97 @@
+name: Run pg_qualstats tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+env:
+  DATADIR: /dev/shm/data
+  LOGFILE: /dev/shm/data/logfile
+
+jobs:
+  pg_qualstats_tests:
+    name: pg_qualstats tests
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        postgres_major_version: [
+          "12",
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+        os: ["ubuntu-22.04"]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up prerequisites and environment
+      run: |
+        echo "************ CLEAN IMAGE ***********"
+        sudo apt remove -y '^postgres.*' '^libpq.*'
+        echo ""
+
+        echo "********* REPOSITORY SET UP ********"
+        sudo apt-get install -y wget gnupg
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        sudo apt-get update -y -qq --fix-missing
+        echo ""
+
+        echo "*********** ENVIRONMENT ************"
+        export PG_MAJOR_VERSION=${{ matrix.postgres_major_version }}
+        echo "PG_MAJOR_VERSION=$PG_MAJOR_VERSION" >> $GITHUB_ENV
+        echo "MAKEFLAGS=$MAKEFLAGS -j $(grep -c ^processor /proc/cpuinfo)" >> $GITHUB_ENV
+        echo ""
+
+        echo "******** INSTALL POSTGRES **********"
+        sudo apt-get install -y \
+          postgresql-$PG_MAJOR_VERSION \
+          postgresql-server-dev-$PG_MAJOR_VERSION \
+          postgresql-contrib-$PG_MAJOR_VERSION
+        echo ""
+
+        echo "******* INSTALL DEPENDENCIES *******"
+        sudo apt-get install -y \
+          gcc \
+          make \
+          build-essential \
+          pkg-config
+        echo ""
+
+        echo "********** READJUST PATH ***********"
+        export PATH=$(pg_config --bindir):$PATH
+        echo "PATH=$PATH" >> $GITHUB_ENV
+        cat $GITHUB_ENV
+        echo ""
+
+    - name: Start a postgres ${{ matrix.postgres_major_version }} server
+      run: |
+        sudo chmod a+rwx /var/run/postgresql/
+        pg_ctl -D $DATADIR initdb
+        echo "shared_preload_libraries = 'pg_stat_statements'" >> $DATADIR/postgresql.conf
+        pg_ctl -D $DATADIR -l $LOGFILE start || cat $LOGFILE
+        psql -c 'select 1 as ok' postgres
+
+    - name: Build and install pg_qualstats for postgres ${{ matrix.postgres_major_version }}
+      run: |
+        make
+        sudo make install
+
+    - name: Enable pg_qualstats on postgres ${{ matrix.postgres_major_version }} server
+      run: |
+        echo "shared_preload_libraries = 'pg_stat_statements,pg_qualstats'" >> $DATADIR/postgresql.conf
+        pg_ctl -D $DATADIR -l $LOGFILE restart || cat $LOGFILE
+        psql -c 'select 1 as ok' postgres
+
+    - name: Run pg_qualstats tests for postgres ${{ matrix.postgres_major_version }}
+      run: make installcheck || ( errcode=$?; cat regression.diffs && exit $errcode )
+
+    - name: Stop the running postgres ${{ matrix.postgres_major_version }} server
+      run: pg_ctl -D $DATADIR stop
