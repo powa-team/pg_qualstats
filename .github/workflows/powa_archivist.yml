@@ -1,11 +1,12 @@
 name: Trigger build and push of powa-archivist image
 
 on:
-  # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
-  tags:
-    - '[0-9]+.[0-9]+.[0-9]+'
-  tags-ignore:
-    - 'debian/*'
+  push:
+    # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+    tags-ignore:
+      - 'debian/*'
 
 env:
   TARGET_REPO: "powa-podman"
