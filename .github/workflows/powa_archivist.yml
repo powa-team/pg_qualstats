@@ -3,8 +3,6 @@ name: Trigger build and push of powa-archivist image
 on:
   push:
     # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
-    tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
     tags-ignore:
       - 'debian/*'
 
