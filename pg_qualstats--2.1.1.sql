@@ -546,7 +546,7 @@ BEGIN
         filtered AS (
           SELECT (qual).relid, amname, coalesce(qualid, qualnodeid) AS parent,
             count(*) AS weight,
-            (array_agg(qualnodeid),
+            (array_agg(DISTINCT qualnodeid),
              array_agg(queryid)
             )::@extschema@.adv_quals AS quals
           FROM pgqs
@@ -628,10 +628,13 @@ BEGIN
             v_cur json;
         BEGIN
             IF rec.included IS NOT NULL THEN
-              FOREACH v_cur IN ARRAY rec.included LOOP
+              FOR v_cur IN SELECT v->'qualnodeids'
+                    FROM (SELECT * FROM unnest(rec.included)) AS r(v)
+                    ORDER BY pg_catalog.json_array_length(v->'qualnodeids') ASC
+              LOOP
                 -- Direct cast from json to bigint is only possible since pg10
                 FOR v_qualnodeid IN
-                    SELECT pg_catalog.json_array_elements(v_cur->'qualnodeids')::text::bigint
+                    SELECT pg_catalog.json_array_elements(v_cur)::text::bigint
                 LOOP
                   v_quals_todo := v_quals_todo || v_qualnodeid;
                 END LOOP;
