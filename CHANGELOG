@@ -1,3 +1,10 @@
+2.1.1
+  Miscellaneous:
+    - Add support for PostgreSQL 17 (Georgy Shelkovy)
+  Bugfix:
+    - Fix memory leak (Ronan Dunklau)
+    - Fix column order of multi-column index in the index advisor (Julien
+      Rouhaud, per report from disqus user Sivan)
 2.1.0
   New feature:
     - Allow custom schema at extension creation time (Julien Rouhaud)
