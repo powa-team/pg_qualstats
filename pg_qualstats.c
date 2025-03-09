@@ -153,8 +153,7 @@ static void pgqs_backend_mode_startup(void);
 static void pgqs_shmem_request(void);
 #endif
 static void pgqs_shmem_startup(void);
-static EXEC_START_RET
-pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static EXEC_START_RET pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgqs_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
