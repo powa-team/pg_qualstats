@@ -109,14 +109,6 @@ PG_MODULE_MAGIC;
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
 
-/* ExecutorStart hook */
-#if PG_VERSION_NUM >= 180000
-#define EXEC_START_RET	bool
-#else
-#define EXEC_START_RET	void
-#endif
-/* end of ExecutorStart hook */
-
 /*
  * Extension version number, for supporting older extension versions' objects
  */
@@ -153,7 +145,7 @@ static void pgqs_backend_mode_startup(void);
 static void pgqs_shmem_request(void);
 #endif
 static void pgqs_shmem_startup(void);
-static EXEC_START_RET pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static void pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgqs_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
@@ -612,7 +604,7 @@ pgqs_fillnames(pgqsEntryWithNames *entry)
 /*
  * Request rows and buffers instrumentation if pgqs is enabled
  */
-static EXEC_START_RET
+static void
 pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	/* Setup instrumentation */
@@ -644,9 +636,9 @@ pgqs_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			queryDesc->instrument_options |= PGQS_FLAGS;
 	}
 	if (prev_ExecutorStart)
-		return prev_ExecutorStart(queryDesc, eflags);
+		prev_ExecutorStart(queryDesc, eflags);
 	else
-		return standard_ExecutorStart(queryDesc, eflags);
+		standard_ExecutorStart(queryDesc, eflags);
 
 }
 
