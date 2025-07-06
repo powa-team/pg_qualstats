@@ -1,3 +1,6 @@
+2.1.2
+  Miscellaneous:
+    - Add support for PostgreSQL 18 (Georgy Shelkovy)
 2.1.1
   Miscellaneous:
     - Add support for PostgreSQL 17 (Georgy Shelkovy)
