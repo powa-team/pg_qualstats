@@ -812,9 +812,9 @@ pgqs_ExecutorEnd(QueryDesc *queryDesc)
 		if (context->nentries)
 		{
 			/*
-			 * Before acquiring exlusive lwlock, check if there's enough room
+			 * Before acquiring exclusive lwlock, check if there's enough room
 			 * to store local hash.  Also, do not remove more than 20% of
-			 * maximum number of entries in shared memory (wether they are
+			 * maximum number of entries in shared memory (whether they are
 			 * used or not). This should not happen since we shouldn't store
 			 * that much entries in localhash in the first place.
 			 */
