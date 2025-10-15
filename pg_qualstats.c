@@ -2391,6 +2391,17 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 	List	   *tlist = NULL;
 	PlanState  *planstate = context->planstate;
 
+	/*
+	 * This function can recurse, so this can prevent infinite loop in case of
+	 * any problem.
+	 */
+	CHECK_FOR_INTERRUPTS();
+
+#if PG_VERSION_NUM >= 140000
+	/* ROWID_VAR is only used during planning, so we shouldn't see it. */
+	Assert(var->varno != ROWID_VAR);
+#endif
+
 	pgqs_set_planstates(context->planstate, context);
 	switch (var->varno)
 	{
@@ -2436,6 +2447,13 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 	}
 
 	pgqs_set_planstates(planstate, context);
+
+	/*
+	 * If the resolved var is still a var with a special varno, we need to
+	 * resolve it again.
+	 */
+	if (IsA(var, Var) && IS_SPECIAL_VARNO(var->varno))
+		return pgqs_resolve_var(var, context);
 
 	return (Expr *) var;
 }

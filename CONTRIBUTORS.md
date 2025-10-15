@@ -17,3 +17,4 @@
   * github user RekGRpth
   * Zhihong Yu
   * github user romanstingler
+  * Kenny Chen
