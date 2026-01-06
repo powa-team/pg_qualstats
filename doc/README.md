@@ -57,7 +57,7 @@ The following GUCs can be configured, in postgresql.conf:
 
 - *pg_qualstats.enabled* (boolean, default true): whether or not pg_qualstats
   should be enabled
-- *pg_qualstats.track_constants* (bolean, default true): whether or not
+- *pg_qualstats.track_constants* (boolean, default true): whether or not
   pg_qualstats should keep track of each constant value individually. Disabling
   this GUC will considerably reduce the number of entries necessary to keep
   track of predicates.
