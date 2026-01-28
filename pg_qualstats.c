@@ -2395,7 +2395,7 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 	 * This function can recurse, so this can prevent infinite loop in case of
 	 * any problem.
 	 */
-	CHECK_FOR_INTERRUPTS();
+	CHECK_STACK_DEPTH();
 
 #if PG_VERSION_NUM >= 140000
 	/* ROWID_VAR is only used during planning, so we shouldn't see it. */
