@@ -45,6 +45,9 @@
 #if PG_VERSION_NUM >= 150000
 #include "common/pg_prng.h"
 #endif
+#if PG_VERSION_NUM >= 190000
+#include "executor/instrument.h"
+#endif
 #include "fmgr.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
