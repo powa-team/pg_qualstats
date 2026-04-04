@@ -1898,12 +1898,20 @@ pgqs_shmem_startup(void)
 	queryinfo.hash = pgqs_uint32_hashfn;
 #endif
 	pgqs_hash = ShmemInitHash("pg_qualstatements_hash",
+#if PG_VERSION_NUM >= 190000
+							  pgqs_max,
+#else
 							  pgqs_max, pgqs_max,
+#endif
 							  &info,
 							  HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
 
 	pgqs_query_examples_hash = ShmemInitHash("pg_qualqueryexamples_hash",
+#if PG_VERSION_NUM >= 190000
+											 pgqs_max,
+#else
 											 pgqs_max, pgqs_max,
+#endif
 											 &queryinfo,
 
 /* On PG > 9.5, use the HASH_BLOBS optimization for uint32 keys. */
