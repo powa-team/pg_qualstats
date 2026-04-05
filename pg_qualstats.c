@@ -1105,10 +1105,24 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 			quals = ((NestLoop *) plan)->join.joinqual;
 			break;
 		case T_MergeJoin:
-			quals = ((MergeJoin *) plan)->mergeclauses;
+			{
+				MergeJoin *mj = ((MergeJoin *) plan);
+
+				quals = mj->mergeclauses;
+
+				if (mj->join.joinqual != NULL)
+					quals = list_union(quals, mj->join.joinqual);
+			}
 			break;
 		case T_HashJoin:
-			quals = ((HashJoin *) plan)->hashclauses;
+			{
+				HashJoin *hj = (HashJoin *) plan;
+
+				quals = hj->hashclauses;
+
+				if (hj->join.joinqual != NULL)
+					quals = list_union(quals, hj->join.joinqual);
+			}
 			break;
 		default:
 			break;

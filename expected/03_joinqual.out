@@ -1,0 +1,138 @@
+-- Make sure sure we'll see at least one qual
+SET pg_qualstats.sample_rate = 1;
+-- test join quals, using simplified version of tpch tables
+CREATE TABLE part (
+        p_partkey integer,
+        p_brand char(10),
+        p_container char(10)
+);
+CREATE TABLE lineitem (
+        l_orderkey bigint,
+        l_partkey integer,
+        l_quantity numeric
+);
+--------------------
+-- Test Hash Join --
+--------------------
+SET enable_hashjoin = true;
+SET enable_mergejoin = false;
+-- Make sure that installcheck won't find previous data
+SELECT "PGQS".pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT count(*)
+FROM lineitem, part
+WHERE
+    p_partkey = l_partkey
+    AND p_brand = 'Brand#23'
+    AND p_container = 'MED BOX'
+    AND l_quantity < (
+      select
+        0.2 * avg(l_quantity)
+      FROM
+        lineitem
+      WHERE
+        l_partkey = p_partkey
+);
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Hash Join
+         Hash Cond: (lineitem.l_partkey = part.p_partkey)
+         Join Filter: (lineitem.l_quantity < (SubPlan 1))
+         ->  Seq Scan on lineitem
+         ->  Hash
+               ->  Seq Scan on part
+                     Filter: ((p_brand = 'Brand#23'::bpchar) AND (p_container = 'MED BOX'::bpchar))
+         SubPlan 1
+           ->  Aggregate
+                 ->  Seq Scan on lineitem lineitem_1
+                       Filter: (l_partkey = part.p_partkey)
+(12 rows)
+
+SELECT lc.relname, la.attname,
+    opno::regoperator,
+    rc.relname, ra.attname,
+    constvalue
+FROM "PGQS".pg_qualstats pgqs
+LEFT JOIN pg_class lc ON lc.oid = pgqs.lrelid
+LEFT JOIN pg_attribute la ON la.attrelid = lc.oid AND la.attnum = pgqs.lattnum
+LEFT JOIN pg_class rc ON rc.oid = pgqs.rrelid
+LEFT JOIN pg_attribute ra ON ra.attrelid = rc.oid AND ra.attnum = pgqs.rattnum
+ORDER BY 1, 2, 4, 5, 3;
+ relname  |   attname   |          opno          | relname |  attname  |     constvalue     
+----------+-------------+------------------------+---------+-----------+--------------------
+ lineitem | l_partkey   | =(integer,integer)     | part    | p_partkey | 
+ lineitem | l_partkey   | =(integer,integer)     |         |           | 
+ lineitem | l_quantity  | <(numeric,numeric)     |         |           | 
+ part     | p_brand     | =(character,character) |         |           | 'Brand#23'::bpchar
+ part     | p_container | =(character,character) |         |           | 'MED BOX'::bpchar
+(5 rows)
+
+---------------------
+-- Test Merge Join --
+---------------------
+SET enable_hashjoin = false;
+SET enable_mergejoin = true;
+-- Make sure that installcheck won't find previous data
+SELECT "PGQS".pg_qualstats_reset();
+ pg_qualstats_reset 
+--------------------
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT count(*)
+FROM lineitem, part
+WHERE
+    p_partkey = l_partkey
+    AND p_brand = 'Brand#23'
+    AND p_container = 'MED BOX'
+    AND l_quantity < (
+      select
+        0.2 * avg(l_quantity)
+      FROM
+        lineitem
+      WHERE
+        l_partkey = p_partkey
+);
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Merge Join
+         Merge Cond: (part.p_partkey = lineitem.l_partkey)
+         Join Filter: (lineitem.l_quantity < (SubPlan 1))
+         ->  Sort
+               Sort Key: part.p_partkey
+               ->  Seq Scan on part
+                     Filter: ((p_brand = 'Brand#23'::bpchar) AND (p_container = 'MED BOX'::bpchar))
+         ->  Sort
+               Sort Key: lineitem.l_partkey
+               ->  Seq Scan on lineitem
+         SubPlan 1
+           ->  Aggregate
+                 ->  Seq Scan on lineitem lineitem_1
+                       Filter: (l_partkey = part.p_partkey)
+(15 rows)
+
+SELECT lc.relname, la.attname,
+    opno::regoperator,
+    rc.relname, ra.attname,
+    constvalue
+FROM "PGQS".pg_qualstats pgqs
+LEFT JOIN pg_class lc ON lc.oid = pgqs.lrelid
+LEFT JOIN pg_attribute la ON la.attrelid = lc.oid AND la.attnum = pgqs.lattnum
+LEFT JOIN pg_class rc ON rc.oid = pgqs.rrelid
+LEFT JOIN pg_attribute ra ON ra.attrelid = rc.oid AND ra.attnum = pgqs.rattnum
+ORDER BY 1, 2, 4, 5, 3;
+ relname  |   attname   |          opno          | relname  |  attname  |     constvalue     
+----------+-------------+------------------------+----------+-----------+--------------------
+ lineitem | l_partkey   | =(integer,integer)     |          |           | 
+ lineitem | l_quantity  | <(numeric,numeric)     |          |           | 
+ part     | p_brand     | =(character,character) |          |           | 'Brand#23'::bpchar
+ part     | p_container | =(character,character) |          |           | 'MED BOX'::bpchar
+ part     | p_partkey   | =(integer,integer)     | lineitem | l_partkey | 
+(5 rows)
+
