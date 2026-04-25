@@ -23,7 +23,7 @@ SELECT "PGQS".pg_qualstats_reset();
  
 (1 row)
 
-EXPLAIN (COSTS OFF) SELECT count(*)
+SELECT explain_filter($$EXPLAIN (COSTS OFF) SELECT count(*)
 FROM lineitem, part
 WHERE
     p_partkey = l_partkey
@@ -37,17 +37,18 @@ WHERE
       WHERE
         l_partkey = p_partkey
 );
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+$$);
+                                          explain_filter                                           
+---------------------------------------------------------------------------------------------------
  Aggregate
    ->  Hash Join
          Hash Cond: (lineitem.l_partkey = part.p_partkey)
-         Join Filter: (lineitem.l_quantity < (SubPlan 1))
+         Join Filter: (lineitem.l_quantity < (SubPlan N))
          ->  Seq Scan on lineitem
          ->  Hash
                ->  Seq Scan on part
-                     Filter: ((p_brand = 'Brand#23'::bpchar) AND (p_container = 'MED BOX'::bpchar))
-         SubPlan 1
+                     Filter: ((p_brand = 'Brand#N'::bpchar) AND (p_container = 'MED BOX'::bpchar))
+         SubPlan N
            ->  Aggregate
                  ->  Seq Scan on lineitem lineitem_1
                        Filter: (l_partkey = part.p_partkey)
@@ -84,7 +85,7 @@ SELECT "PGQS".pg_qualstats_reset();
  
 (1 row)
 
-EXPLAIN (COSTS OFF) SELECT count(*)
+SELECT explain_filter($$EXPLAIN (COSTS OFF) SELECT count(*)
 FROM lineitem, part
 WHERE
     p_partkey = l_partkey
@@ -98,20 +99,21 @@ WHERE
       WHERE
         l_partkey = p_partkey
 );
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+$$);
+                                          explain_filter                                           
+---------------------------------------------------------------------------------------------------
  Aggregate
    ->  Merge Join
          Merge Cond: (part.p_partkey = lineitem.l_partkey)
-         Join Filter: (lineitem.l_quantity < (SubPlan 1))
+         Join Filter: (lineitem.l_quantity < (SubPlan N))
          ->  Sort
                Sort Key: part.p_partkey
                ->  Seq Scan on part
-                     Filter: ((p_brand = 'Brand#23'::bpchar) AND (p_container = 'MED BOX'::bpchar))
+                     Filter: ((p_brand = 'Brand#N'::bpchar) AND (p_container = 'MED BOX'::bpchar))
          ->  Sort
                Sort Key: lineitem.l_partkey
                ->  Seq Scan on lineitem
-         SubPlan 1
+         SubPlan N
            ->  Aggregate
                  ->  Seq Scan on lineitem lineitem_1
                        Filter: (l_partkey = part.p_partkey)

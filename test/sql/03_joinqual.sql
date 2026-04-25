@@ -24,7 +24,7 @@ SET enable_mergejoin = false;
 -- Make sure that installcheck won't find previous data
 SELECT "PGQS".pg_qualstats_reset();
 
-EXPLAIN (COSTS OFF) SELECT count(*)
+SELECT explain_filter($$EXPLAIN (COSTS OFF) SELECT count(*)
 FROM lineitem, part
 WHERE
     p_partkey = l_partkey
@@ -38,6 +38,7 @@ WHERE
       WHERE
         l_partkey = p_partkey
 );
+$$);
 
 SELECT lc.relname, la.attname,
     opno::regoperator,
@@ -60,7 +61,7 @@ SET enable_mergejoin = true;
 -- Make sure that installcheck won't find previous data
 SELECT "PGQS".pg_qualstats_reset();
 
-EXPLAIN (COSTS OFF) SELECT count(*)
+SELECT explain_filter($$EXPLAIN (COSTS OFF) SELECT count(*)
 FROM lineitem, part
 WHERE
     p_partkey = l_partkey
@@ -74,6 +75,7 @@ WHERE
       WHERE
         l_partkey = p_partkey
 );
+$$);
 
 SELECT lc.relname, la.attname,
     opno::regoperator,
