@@ -21,6 +21,8 @@ BEGIN
         -- Ignore text-mode "Planning:" line because whether it's output
         -- varies depending on the system state
         CONTINUE WHEN (ln = 'Planning:');
+        -- Remove the "expr_" name prefix in subplans names, added in pg19
+        ln := regexp_replace(ln, 'SubPlan expr_\d+', 'SubPlan N', 'g');
         RETURN NEXT ln;
     END LOOP;
 END;

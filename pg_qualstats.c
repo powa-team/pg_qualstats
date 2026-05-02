@@ -45,6 +45,7 @@
 #if PG_VERSION_NUM >= 150000
 #include "common/pg_prng.h"
 #endif
+#include "executor/instrument.h"
 #include "fmgr.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -99,6 +100,14 @@ PG_MODULE_MAGIC;
 #define PGQS_LWL_RELEASE(lock) if (!pgqs_backend) { \
 	LWLockRelease(lock); \
 	}
+
+#if PG_VERSION_NUM < 190000
+/*
+ * pg19 changed the init/max size to a single fixed size, so simulate that
+ * behavior for older versions.
+ */
+#define ShmemInitHash(n, nelem, i, f) ShmemInitHash(n, nelem, nelem, i, f)
+#endif
 
 #if PG_VERSION_NUM < 170000
 #define MyProcNumber MyBackendId
@@ -1054,7 +1063,11 @@ static void
 pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *context)
 {
 	Plan	   *plan = planstate->plan;
-	Instrumentation *instrument = planstate->instrument;
+#if PG_VERSION_NUM >= 190000
+	NodeInstrumentation *instrument;
+#else
+	Instrumentation *instrument;
+#endif
 	int64		oldcount = context->count;
 	double		oldfiltered = context->nbfiltered;
 	double		old_err_ratio = context->err_estim[PGQS_RATIO];
@@ -1065,6 +1078,7 @@ pgqs_collectNodeStats(PlanState *planstate, List *ancestors, pgqsWalkerContext *
 	List	   *indexquals = 0;
 	List	   *quals = 0;
 
+	instrument = planstate->instrument;
 	context->planstate = planstate;
 
 	/*
@@ -1912,12 +1926,12 @@ pgqs_shmem_startup(void)
 	queryinfo.hash = pgqs_uint32_hashfn;
 #endif
 	pgqs_hash = ShmemInitHash("pg_qualstatements_hash",
-							  pgqs_max, pgqs_max,
+							  pgqs_max,
 							  &info,
 							  HASH_ELEM | HASH_FUNCTION | HASH_FIXED_SIZE);
 
 	pgqs_query_examples_hash = ShmemInitHash("pg_qualqueryexamples_hash",
-											 pgqs_max, pgqs_max,
+											 pgqs_max,
 											 &queryinfo,
 
 /* On PG > 9.5, use the HASH_BLOBS optimization for uint32 keys. */
