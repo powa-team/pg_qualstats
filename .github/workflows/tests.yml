@@ -26,7 +26,8 @@ jobs:
           "15",
           "16",
           "17",
-          "18"
+          "18",
+          "19devel"
         ]
         os: ["ubuntu-22.04"]
 
@@ -35,23 +36,40 @@ jobs:
 
     - name: Set up prerequisites and environment
       run: |
+        echo "*********** ENVIRONMENT ************"
+        if [[ "${{ matrix.postgres_major_version }}" == *"devel" ]]; then
+          pg_major=$( echo "${{ matrix.postgres_major_version }}" | grep -Eo "[0-9]+")
+          devel="yes"
+        else
+          pg_major="${{ matrix.postgres_major_version }}"
+          devel="no"
+        fi
+
+        export PG_MAJOR_VERSION=${pg_major}
+        echo "PG_MAJOR_VERSION=$PG_MAJOR_VERSION" >> $GITHUB_ENV
+        echo "MAKEFLAGS=$MAKEFLAGS -j $(grep -c ^processor /proc/cpuinfo)" >> $GITHUB_ENV
+        echo ""
+
         echo "************ CLEAN IMAGE ***********"
         sudo apt remove -y '^postgres.*' '^libpq.*'
         echo ""
 
         echo "********* REPOSITORY SET UP ********"
         sudo apt-get install -y wget gnupg
-        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+
+        if [[ "${devel}" == "yes" ]]; then
+          sudo add-apt-repository "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg-snapshot main ${PG_MAJOR_VERSION}"
+        else
+          sudo sh -c "echo ""deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"" > /etc/apt/sources.list.d/pgdg.list"
+        fi
+        echo "pgdg.list:"
+        cat /etc/apt/sources.list.d/pgdg.list
+
         wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        dpkg -l | grep postgres
         sudo apt-get update -y -qq --fix-missing
-        echo ""
 
-        echo "*********** ENVIRONMENT ************"
-        export PG_MAJOR_VERSION=${{ matrix.postgres_major_version }}
-        echo "PG_MAJOR_VERSION=$PG_MAJOR_VERSION" >> $GITHUB_ENV
-        echo "MAKEFLAGS=$MAKEFLAGS -j $(grep -c ^processor /proc/cpuinfo)" >> $GITHUB_ENV
         echo ""
-
         echo "******** INSTALL POSTGRES **********"
         sudo apt-get install -y \
           postgresql-$PG_MAJOR_VERSION \
