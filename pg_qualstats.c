@@ -1597,6 +1597,10 @@ pgqs_process_opexpr(OpExpr *expr, pgqsWalkerContext *context)
 			if (IsA(node, Var))
 				node = (Node *) pgqs_resolve_var((Var *) node, context);
 
+			/* Do not record a partially resolved predicate. */
+			if (node == NULL)
+				return NULL;
+
 			switch (node->type)
 			{
 				case T_Var:
@@ -2413,16 +2417,15 @@ pgqs_set_planstates(PlanState *planstate, pgqsWalkerContext *context)
 		context->index_tlist = NIL;
 }
 
+/* Return NULL if a special Var has no available target-list entry. */
 static Expr *
 pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 {
 	List	   *tlist = NULL;
 	PlanState  *planstate = context->planstate;
+	TargetEntry *entry;
 
-	/*
-	 * This function can recurse, so this can prevent infinite loop in case of
-	 * any problem.
-	 */
+	/* Allow cancellation while following a chain of special Vars. */
 	CHECK_FOR_INTERRUPTS();
 
 #if PG_VERSION_NUM >= 140000
@@ -2445,23 +2448,26 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 		default:
 			return (Expr *) var;
 	}
-	if (tlist != NULL)
-	{
-		TargetEntry *entry = get_tle_by_resno(tlist, var->varattno);
+	/*
+	 * Execution-time pruning can remove every child of an Append or
+	 * MergeAppend.  Retrying the same Var in that state cannot make progress.
+	 */
+	if (tlist == NIL)
+		return NULL;
 
-		if (entry != NULL)
-		{
-			Var		   *newvar = (Var *) (entry->expr);
+	entry = get_tle_by_resno(tlist, var->varattno);
+	if (entry == NULL)
+		return NULL;
 
-			if (var->varno == OUTER_VAR)
-				pgqs_set_planstates(context->outer_planstate, context);
+	if (var->varno == OUTER_VAR)
+		pgqs_set_planstates(context->outer_planstate, context);
+	if (var->varno == INNER_VAR)
+		pgqs_set_planstates(context->inner_planstate, context);
 
-			if (var->varno == INNER_VAR)
-				pgqs_set_planstates(context->inner_planstate, context);
-
-			var = (Var *) pgqs_resolve_var(newvar, context);
-		}
-	}
+	var = (Var *) pgqs_resolve_var((Var *) entry->expr, context);
+	pgqs_set_planstates(planstate, context);
+	if (var == NULL)
+		return NULL;
 
 	Assert(!(IsA(var, Var) && IS_SPECIAL_VARNO(var->varno)));
 
@@ -2473,8 +2479,6 @@ pgqs_resolve_var(Var *var, pgqsWalkerContext *context)
 		consttext = (Const *) makeConst(TEXTOID, -1, -1, -1, CStringGetTextDatum(nodeToString(var)), false, false);
 		var = (Var *) consttext;
 	}
-
-	pgqs_set_planstates(planstate, context);
 
 	/*
 	 * If the resolved var is still a var with a special varno, we need to
@@ -2589,7 +2593,23 @@ exprRepr(Expr *expr, StringInfo buffer, pgqsWalkerContext *context, bool include
 
 	appendStringInfo(buffer, "%d-", expr->type);
 	if (IsA(expr, Var))
+	{
+		Var		   *var = (Var *) expr;
+
 		expr = pgqs_resolve_var((Var *) expr, context);
+		if (expr == NULL)
+		{
+			/* Keep unavailable Vars distinct when hashing a parent clause. */
+			appendStringInfo(buffer, "UNRESOLVED(%u;%d",
+							 var->varno, var->varattno);
+#if PG_VERSION_NUM >= 90600
+			appendStringInfo(buffer, ";%d",
+							 context->planstate->plan->plan_node_id);
+#endif
+			appendStringInfoChar(buffer, ')');
+			return;
+		}
+	}
 
 	switch (expr->type)
 	{

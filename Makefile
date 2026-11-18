@@ -20,3 +20,8 @@ release-zip: all
 DATA = $(wildcard *--*.sql)
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+# This regression uses plan_cache_mode, introduced in PostgreSQL 12.
+ifneq ($(filter 9.4 9.5 9.6 10 11,$(MAJORVERSION)),)
+REGRESS := $(filter-out 04_pruning,$(REGRESS))
+endif
